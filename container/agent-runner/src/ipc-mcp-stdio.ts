@@ -333,6 +333,147 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+server.tool(
+  'self_diagnose',
+  'Run a self-diagnostic check. Scans recent container logs for errors/warnings, checks IPC queue health, reports disk usage, reads current tasks, and verifies CLAUDE.md. No IPC needed — reads local container files only.',
+  {},
+  async () => {
+    const report: {
+      timestamp: string;
+      logs: { file: string; errors: string[]; warnings: string[] }[];
+      ipc_queue: { pending_messages: number; pending_tasks: number };
+      disk_usage: { path: string; size_bytes: number | null; error?: string };
+      current_tasks: { count: number; tasks: unknown[] | null; error?: string };
+      claude_md: { exists: boolean; size_bytes: number | null; path: string };
+      overall_status: 'healthy' | 'degraded' | 'error';
+      issues: string[];
+    } = {
+      timestamp: new Date().toISOString(),
+      logs: [],
+      ipc_queue: { pending_messages: 0, pending_tasks: 0 },
+      disk_usage: { path: '/workspace/group/', size_bytes: null },
+      current_tasks: { count: 0, tasks: null },
+      claude_md: { exists: false, size_bytes: null, path: '/workspace/group/CLAUDE.md' },
+      overall_status: 'healthy',
+      issues: [],
+    };
+
+    // 1. Scan recent log files for errors/warnings
+    const logsDir = '/workspace/group/logs/';
+    try {
+      if (fs.existsSync(logsDir)) {
+        const logFiles = fs.readdirSync(logsDir)
+          .filter((f: string) => f.endsWith('.log'))
+          .sort()
+          .slice(-3); // last 3 log files
+
+        for (const file of logFiles) {
+          const logPath = path.join(logsDir, file);
+          const content = fs.readFileSync(logPath, 'utf-8');
+          const lines = content.split('\n');
+          const errors: string[] = [];
+          const warnings: string[] = [];
+
+          for (const line of lines) {
+            const lower = line.toLowerCase();
+            if (lower.includes('error') || lower.includes('exception') || lower.includes('fatal')) {
+              errors.push(line.trim().slice(0, 200));
+            } else if (lower.includes('warn')) {
+              warnings.push(line.trim().slice(0, 200));
+            }
+          }
+
+          report.logs.push({
+            file,
+            errors: errors.slice(-10), // last 10 errors per file
+            warnings: warnings.slice(-10),
+          });
+
+          if (errors.length > 0) {
+            report.issues.push(`${errors.length} error(s) found in ${file}`);
+          }
+        }
+      } else {
+        report.issues.push('Logs directory not found at ' + logsDir);
+      }
+    } catch (err) {
+      report.issues.push(`Failed to read logs: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // 2. Check IPC queue health
+    try {
+      if (fs.existsSync(MESSAGES_DIR)) {
+        const msgFiles = fs.readdirSync(MESSAGES_DIR).filter((f: string) => f.endsWith('.json'));
+        report.ipc_queue.pending_messages = msgFiles.length;
+        if (msgFiles.length > 10) {
+          report.issues.push(`${msgFiles.length} pending IPC messages (possible backlog)`);
+        }
+      }
+    } catch { /* ignore */ }
+
+    try {
+      if (fs.existsSync(TASKS_DIR)) {
+        const taskFiles = fs.readdirSync(TASKS_DIR).filter((f: string) => f.endsWith('.json'));
+        report.ipc_queue.pending_tasks = taskFiles.length;
+        if (taskFiles.length > 10) {
+          report.issues.push(`${taskFiles.length} pending IPC tasks (possible backlog)`);
+        }
+      }
+    } catch { /* ignore */ }
+
+    // 3. Disk usage of /workspace/group/
+    try {
+      const { execSync } = await import('child_process');
+      const duOutput = execSync('du -sb /workspace/group/ 2>/dev/null || echo "0\t/workspace/group/"', { encoding: 'utf-8' });
+      const sizeStr = duOutput.split('\t')[0].trim();
+      report.disk_usage.size_bytes = parseInt(sizeStr, 10) || 0;
+    } catch (err) {
+      report.disk_usage.error = err instanceof Error ? err.message : String(err);
+    }
+
+    // 4. Read current tasks
+    const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
+    try {
+      if (fs.existsSync(tasksFile)) {
+        const tasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
+        report.current_tasks.count = Array.isArray(tasks) ? tasks.length : 0;
+        report.current_tasks.tasks = tasks;
+      }
+    } catch (err) {
+      report.current_tasks.error = err instanceof Error ? err.message : String(err);
+      report.issues.push('Failed to read current_tasks.json');
+    }
+
+    // 5. Check CLAUDE.md
+    const claudeMdPath = '/workspace/group/CLAUDE.md';
+    try {
+      if (fs.existsSync(claudeMdPath)) {
+        const stat = fs.statSync(claudeMdPath);
+        report.claude_md.exists = true;
+        report.claude_md.size_bytes = stat.size;
+        if (stat.size === 0) {
+          report.issues.push('CLAUDE.md exists but is empty');
+        }
+      } else {
+        report.issues.push('CLAUDE.md not found — group has no memory file');
+      }
+    } catch { /* ignore */ }
+
+    // 6. Determine overall status
+    if (report.issues.length === 0) {
+      report.overall_status = 'healthy';
+    } else if (report.issues.some(i => i.includes('error') || i.includes('Failed'))) {
+      report.overall_status = 'error';
+    } else {
+      report.overall_status = 'degraded';
+    }
+
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(report, null, 2) }],
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
