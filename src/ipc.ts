@@ -1270,14 +1270,17 @@ export async function processTaskIpc(
             // Abort the failed merge to leave main in a clean state.
             try {
               execSync('git merge --abort', { cwd, stdio: 'pipe' });
-            } catch { /* merge may not be in progress */ }
+            } catch {
+              /* merge may not be in progress */
+            }
 
             const mergeErrMsg =
-              mergeErr instanceof Error ? mergeErr.message.slice(-500) : String(mergeErr);
+              mergeErr instanceof Error
+                ? mergeErr.message.slice(-500)
+                : String(mergeErr);
             const mergeFailEmbed: EmbedData = {
               title: '⚠️ Build Complete — Merge Failed',
-              description:
-                `Build and tests passed, but merge into main failed. Work preserved on branch \`${branchName}\`.`,
+              description: `Build and tests passed, but merge into main failed. Work preserved on branch \`${branchName}\`.`,
               color: 16776960, // yellow
               fields: [
                 {
@@ -1297,7 +1300,10 @@ export async function processTaskIpc(
                 },
                 {
                   name: 'Recovery',
-                  value: 'Reply "cleanup" to discard, or merge manually:\n`cd ' + worktreeDir + ' && git diff main`',
+                  value:
+                    'Reply "cleanup" to discard, or merge manually:\n`cd ' +
+                    worktreeDir +
+                    ' && git diff main`',
                   inline: false,
                 },
               ],

@@ -576,7 +576,10 @@ async function main(): Promise<void> {
         await new Promise((r) => setTimeout(r, 2000));
         const ch = findChannel(channels, jid);
         if (ch) {
-          logger.info({ jid, channel: ch.name }, 'Sending startup message to main group');
+          logger.info(
+            { jid, channel: ch.name },
+            'Sending startup message to main group',
+          );
           try {
             await ch.sendMessage(jid, '🖤 Back online!');
             logger.info({ jid }, 'Startup message sent successfully');
