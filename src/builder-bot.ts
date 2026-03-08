@@ -32,7 +32,10 @@ export async function connectBuilderBot(): Promise<boolean> {
   if (client && ready) return true;
 
   const token = getToken();
-  if (!token) return false;
+  if (!token) {
+    logger.warn('Builder bot: DISCORD_BUILDER_BOT_TOKEN not set in .env — falling back to main bot');
+    return false;
+  }
 
   // Tear down stale client if exists
   if (client) {
