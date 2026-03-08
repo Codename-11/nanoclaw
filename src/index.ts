@@ -566,13 +566,24 @@ async function main(): Promise<void> {
   }
 
   // Send startup acknowledgement to main group
-  for (const [jid, group] of Object.entries(registeredGroups)) {
+  const groupEntries = Object.entries(registeredGroups);
+  logger.info(
+    { groupCount: groupEntries.length, channelCount: channels.length },
+    'Startup: looking for main group to send ack',
+  );
+  for (const [jid, group] of groupEntries) {
     if (group.isMain) {
       const ch = findChannel(channels, jid);
+      logger.info(
+        { jid, channelFound: !!ch, channelName: ch?.name },
+        'Startup: found main group',
+      );
       if (ch) {
-        ch.sendMessage(jid, '🖤 Back online!').catch((err) =>
-          logger.warn({ jid, err }, 'Failed to send startup message'),
-        );
+        ch.sendMessage(jid, '🖤 Back online!')
+          .then(() => logger.info({ jid }, 'Startup: ack sent successfully'))
+          .catch((err) =>
+            logger.warn({ jid, err }, 'Failed to send startup message'),
+          );
       }
       break;
     }
