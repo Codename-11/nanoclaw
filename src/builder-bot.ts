@@ -40,52 +40,65 @@ function getToken(): string {
  * no token is configured. Reuses an existing connection if already logged in.
  */
 export async function connectBuilderBot(): Promise<boolean> {
-  if (client && ready) {
-    logger.info('Builder bot: reusing existing connection');
-    return true;
-  }
+  logger.info('Builder bot: connectBuilderBot() entered');
+  try {
+    if (client && ready) {
+      logger.info('Builder bot: reusing existing connection');
+      return true;
+    }
 
-  const token = getToken();
-  if (!token) {
-    logger.warn(
-      'Builder bot: DISCORD_BUILDER_BOT_TOKEN not set — falling back to main bot',
+    const token = getToken();
+    if (!token) {
+      logger.warn(
+        'Builder bot: DISCORD_BUILDER_BOT_TOKEN not set — falling back to main bot',
+      );
+      return false;
+    }
+
+    // Tear down stale client if exists
+    if (client) {
+      try {
+        client.destroy();
+      } catch {
+        /* ignore */
+      }
+    }
+
+    logger.info('Builder bot: creating Client and calling login...');
+    client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+    return new Promise<boolean>((resolve) => {
+      const timeout = setTimeout(() => {
+        logger.warn('Builder bot login timed out (15s)');
+        resolve(false);
+      }, 15_000);
+
+      client!.once('ready', (c) => {
+        clearTimeout(timeout);
+        ready = true;
+        logger.info(
+          { username: c.user.tag, id: c.user.id },
+          'Builder bot connected as',
+        );
+        resolve(true);
+      });
+
+      client!.login(token).catch((err) => {
+        clearTimeout(timeout);
+        logger.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Builder bot login failed',
+        );
+        resolve(false);
+      });
+    });
+  } catch (err) {
+    logger.error(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Builder bot: connectBuilderBot() threw unexpectedly',
     );
     return false;
   }
-
-  // Tear down stale client if exists
-  if (client) {
-    try {
-      client.destroy();
-    } catch {
-      /* ignore */
-    }
-  }
-
-  client = new Client({ intents: [GatewayIntentBits.Guilds] });
-
-  return new Promise<boolean>((resolve) => {
-    const timeout = setTimeout(() => {
-      logger.warn('Builder bot login timed out (15s)');
-      resolve(false);
-    }, 15_000);
-
-    client!.once('ready', (c) => {
-      clearTimeout(timeout);
-      ready = true;
-      logger.info(
-        { username: c.user.tag, id: c.user.id },
-        'Builder bot connected as',
-      );
-      resolve(true);
-    });
-
-    client!.login(token).catch((err) => {
-      clearTimeout(timeout);
-      logger.warn({ err: String(err) }, 'Builder bot login failed');
-      resolve(false);
-    });
-  });
 }
 
 /**
