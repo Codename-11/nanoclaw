@@ -640,6 +640,7 @@ The `nanoclaw` MCP server is created dynamically per agent call with the current
 | `add_reaction` | Add an emoji reaction to a message (Discord) |
 | `run_host_command` | Run a predefined host command: `update`, `restart`, `status` (main only) |
 | `self_diagnose` | Run container self-diagnostics (logs, IPC queues, disk, tasks, CLAUDE.md) |
+| `self_build_status` | Check if a Mini-Daemon build session is active (main only) |
 
 ---
 

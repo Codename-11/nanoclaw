@@ -14,11 +14,13 @@ When the user asks you to:
 ## How It Works
 
 1. You call `mcp__nanoclaw__self_build` with a detailed prompt
-2. **Mini-Daemon** (🔧) spawns on the host and appears in chat as a sidecar
-3. Mini-Daemon streams what it's doing — batched updates every 5s, not per-tool-call
-4. The user can talk to Mini-Daemon directly during the session (messages are forwarded)
-5. When done, Mini-Daemon validates (build + test), merges on success, rolls back on failure
-6. NanoClaw restarts automatically with the new code
+2. A git **worktree** is created in `/tmp/` — an isolated copy of the repo on its own branch. The live service on `main` is never touched.
+3. **Mini-Daemon** (🔧) spawns Claude Code in the worktree with PID confirmation and spawn validation
+4. Mini-Daemon streams what it's doing — batched updates every 5s, with heartbeat monitoring (max 5 alerts) for silent periods
+5. The user can talk to Mini-Daemon directly during the session (messages are forwarded)
+6. When done, Mini-Daemon runs `npm run build && npm test` **in the worktree**. Result embeds (green/red) are sent to Discord.
+7. On success: worktree branch is merged into main, worktree is deleted, NanoClaw restarts
+8. On failure: worktree is deleted, main is untouched — nothing to roll back
 
 ## Writing Good Prompts
 
@@ -51,12 +53,31 @@ During a build session, any messages sent to the main channel are forwarded to M
 
 ## Safety
 
-- Git safety branch created before any changes
-- `npm run build && npm test` must pass before merge
-- Auto-rollback on any failure
+- **Git worktree isolation**: Builder runs in a temporary worktree (`/tmp/nanoclaw-build-*`), not in the live repo. Main branch and the running service are never touched during the build.
+- `npm run build && npm test` must pass in the worktree before merge
+- On failure: worktree is deleted, main is untouched — nothing to roll back
+- On success: worktree branch is merged into main, worktree is cleaned up, service restarts
 - Concurrency lock: one session at a time
 - Main group only
 - 10 minute default timeout (max 30)
+
+## Real-Time Control
+
+### Checking Build Status & Logs
+
+Use `mcp__nanoclaw__self_build_status` to check whether a Mini-Daemon session is currently active. Returns status, start time, prompt summary, and live build log. Parameters:
+- `tail_lines` (optional): Number of log lines from the end (default 50, 0 = no log, -1 = full log)
+
+### Messaging Mini-Daemon
+
+Use `mcp__nanoclaw__self_build_message` to send messages directly to Mini-Daemon's stdin during an active session. Use for:
+- Giving corrections or additional instructions mid-build
+- Asking Mini-Daemon questions about what it's doing
+- Telling it to change approach
+
+### Cancelling a Build
+
+Use `mcp__nanoclaw__self_build_cancel` to kill the active builder process and clean up the worktree. Main is never touched.
 
 ## After Success
 

@@ -440,6 +440,7 @@ server.tool(
       'ALWAYS include: "After code changes, update CLAUDE.md, docs/SPEC.md, and groups/main/CLAUDE.md with any new capabilities. ' +
       'If MCP tools were added/changed in container/agent-runner/src/ipc-mcp-stdio.ts, run: rm -rf data/sessions/*/agent-runner-src"',
     ),
+    model: z.string().optional().describe('Model for Mini-Daemon to use (e.g., "claude-sonnet-4-6", "claude-opus-4-6"). Defaults to Claude Code default.'),
     timeout_minutes: z.number().optional().describe('Max duration in minutes (default: 10, max: 30)'),
   },
   async (args) => {
@@ -453,6 +454,7 @@ server.tool(
     const data = {
       type: 'run_claude_session',
       prompt: args.prompt,
+      model: args.model || undefined,
       timeout: args.timeout_minutes
         ? Math.min(args.timeout_minutes, 30) * 60_000
         : undefined,
@@ -463,12 +465,123 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
+    const sessionRef = `build-${Date.now()}`;
     return {
       content: [{
         type: 'text' as const,
-        text: 'Self-build session requested. Builder will send progress updates to chat. ' +
-          'Changes will be validated (build + test) before merging. Service restarts automatically on success.',
+        text: `Self-build session requested (ref: ${sessionRef}). Builder will post a 🔧 message within ~10 seconds when online. ` +
+          'Progress updates stream to chat. Changes validated (build + test) before merging. ' +
+          'Use self_build_status to check progress. Service restarts automatically on success.',
       }],
+    };
+  },
+);
+
+server.tool(
+  'self_build_status',
+  'Check Mini-Daemon self-build status, including live build log. Main group only. Use tail_lines to control log output (default 50, 0 = no log, -1 = full log).',
+  {
+    tail_lines: z.number().optional().describe('Number of log lines to return from the end (default 50, 0 = no log, -1 = full log)'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can check self-build status.' }],
+        isError: true,
+      };
+    }
+
+    const statusFile = path.join(IPC_DIR, 'self_build_status.json');
+    const logFile = path.join(IPC_DIR, 'self_build_log.txt');
+    try {
+      let status: Record<string, unknown> = { active: false, status: 'no_session', detail: 'No self-build session has been run.' };
+      if (fs.existsSync(statusFile)) {
+        status = JSON.parse(fs.readFileSync(statusFile, 'utf-8'));
+      }
+
+      // Read build log if requested
+      const tailLines = args.tail_lines ?? 50;
+      let log = '';
+      if (tailLines !== 0 && fs.existsSync(logFile)) {
+        const fullLog = fs.readFileSync(logFile, 'utf-8');
+        if (tailLines === -1) {
+          log = fullLog;
+        } else {
+          const lines = fullLog.split('\n');
+          log = lines.slice(-tailLines).join('\n');
+        }
+      }
+
+      const result: Record<string, unknown> = { ...status };
+      if (log) {
+        result.log = log;
+      }
+
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error reading build status: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'self_build_message',
+  'Send a message to the active Mini-Daemon builder session. Use this to give corrections, additional instructions, or ask questions during a build. Main group only.',
+  {
+    message: z.string().describe('Message to send to Mini-Daemon'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can message Mini-Daemon.' }],
+        isError: true,
+      };
+    }
+
+    const taskData = {
+      type: 'forward_to_builder',
+      message: args.message,
+      chatJid,
+      groupFolder,
+    };
+
+    const taskFile = path.join(IPC_DIR, 'tasks', `build_msg_${Date.now()}.json`);
+    fs.writeFileSync(taskFile, JSON.stringify(taskData));
+
+    return {
+      content: [{ type: 'text' as const, text: 'Message sent to Mini-Daemon. It will appear in the builder\'s stdin as a follow-up instruction.' }],
+    };
+  },
+);
+
+server.tool(
+  'self_build_cancel',
+  'Cancel the active Mini-Daemon builder session. Kills the process and cleans up the worktree. Main group only.',
+  {},
+  async () => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can cancel builds.' }],
+        isError: true,
+      };
+    }
+
+    const taskData = {
+      type: 'cancel_build',
+      chatJid,
+      groupFolder,
+    };
+
+    const taskFile = path.join(IPC_DIR, 'tasks', `build_cancel_${Date.now()}.json`);
+    fs.writeFileSync(taskFile, JSON.stringify(taskData));
+
+    return {
+      content: [{ type: 'text' as const, text: 'Cancel request sent. Mini-Daemon will be terminated and the worktree cleaned up.' }],
     };
   },
 );
@@ -558,7 +671,7 @@ server.tool(
         'schedule_task',
         'list_tasks',
         'register_group',
-        ...(isMain ? ['run_host_command', 'change_model'] : []),
+        ...(isMain ? ['run_host_command', 'change_model', 'self_build', 'self_build_status', 'self_build_message', 'self_build_cancel'] : []),
       ],
       container: {
         workspace: '/workspace/group',

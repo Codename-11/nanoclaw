@@ -65,7 +65,7 @@ The Discord channel supports rich messaging beyond plain text:
 - **Thread Support:** Messages from threads route to the parent channel's group; replies go back to the thread automatically
 - **Reactions:** `Channel.addReaction(jid, messageId, emoji)` — agents add emoji reactions via IPC `type: "reaction"`
 - **Self-Update:** IPC `type: "run_host_command"` (main-only) supports `update`, `restart`, `status` commands
-- **Self-Build:** IPC `type: "run_claude_session"` (main-only) spawns a Claude Code sidecar ("Builder") on the host to modify NanoClaw's own codebase with git safety, build validation, and auto-rollback
+- **Self-Build:** IPC `type: "run_claude_session"` (main-only) spawns a Claude Code sidecar ("Builder") on the host to modify NanoClaw's own codebase with git safety, build validation, auto-rollback, status tracking, build result embeds (green/red), heartbeat monitoring, and spawn validation
 
 Discord bot requires these permissions: Send Messages, Read Message History, View Channels, Attach Files, Embed Links, Send Messages in Threads, Add Reactions.
 
