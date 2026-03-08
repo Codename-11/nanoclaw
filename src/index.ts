@@ -192,7 +192,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   logger.info(
-    { group: group.name, messageCount: missedMessages.length, persistent: queue.isPersistent(chatJid) },
+    {
+      group: group.name,
+      messageCount: missedMessages.length,
+      persistent: queue.isPersistent(chatJid),
+    },
     'Processing messages',
   );
 
@@ -218,6 +222,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
   let hadError = false;
   let outputSentToUser = false;
+  // Suppress output from the init prompt when a persistent container starts
+  // with no real messages. The first result is the agent's response to the
+  // system init message — don't send it to Discord.
+  let suppressInitOutput = isPersistent && missedMessages.length === 0;
 
   let output: 'success' | 'error' = 'error';
   try {
@@ -234,7 +242,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           { group: group.name },
           `Agent output: ${raw.slice(0, 200)}`,
         );
-        if (text) {
+        if (suppressInitOutput) {
+          // First output from persistent init — suppress it
+          suppressInitOutput = false;
+          logger.debug({ group: group.name }, 'Suppressed persistent init response');
+        } else if (text) {
           await channel.sendMessage(chatJid, text);
           outputSentToUser = true;
         }
@@ -332,6 +344,7 @@ async function runAgent(
         groupFolder: group.folder,
         chatJid,
         isMain,
+        persistent: queue.isPersistent(chatJid),
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) =>

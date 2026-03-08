@@ -37,6 +37,7 @@ export interface ContainerInput {
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
+  persistent?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
 }
@@ -424,16 +425,21 @@ export async function runContainerAgent(
       });
     };
 
-    let timeout = setTimeout(killOnTimeout, timeoutMs);
+    // Persistent containers have no hard timeout — they stay alive until
+    // explicitly closed via _close sentinel or SIGTERM.
+    let timeout: ReturnType<typeof setTimeout> | null = input.persistent
+      ? null
+      : setTimeout(killOnTimeout, timeoutMs);
 
     // Reset the timeout whenever there's activity (streaming output)
     const resetTimeout = () => {
-      clearTimeout(timeout);
+      if (input.persistent) return; // no timeout to reset
+      if (timeout) clearTimeout(timeout);
       timeout = setTimeout(killOnTimeout, timeoutMs);
     };
 
     container.on('close', (code) => {
-      clearTimeout(timeout);
+      if (timeout) clearTimeout(timeout);
       const duration = Date.now() - startTime;
 
       if (timedOut) {
@@ -628,7 +634,7 @@ export async function runContainerAgent(
     });
 
     container.on('error', (err) => {
-      clearTimeout(timeout);
+      if (timeout) clearTimeout(timeout);
       logger.error(
         { group: group.name, containerName, error: err },
         'Container spawn error',

@@ -256,9 +256,24 @@ export class GroupQueue {
 
       if (state.persistent) {
         // Persistent container exited — caller (index.ts) handles respawn.
-        // Don't drain tasks/messages through this group; just free the slot.
-        logger.info({ groupJid }, 'Persistent container exited, awaiting respawn from caller');
-        this.drainWaiting();
+        // Drain any pending tasks first (they run as ephemeral containers),
+        // then free the slot. The monitor in index.ts handles respawning
+        // the persistent container after tasks complete.
+        logger.info(
+          { groupJid, pendingTasks: state.pendingTasks.length },
+          'Persistent container exited, draining tasks before respawn',
+        );
+        if (state.pendingTasks.length > 0) {
+          const task = state.pendingTasks.shift()!;
+          this.runTask(groupJid, task).catch((err) =>
+            logger.error(
+              { groupJid, taskId: task.id, err },
+              'Unhandled error in runTask (persistent drain)',
+            ),
+          );
+        } else {
+          this.drainWaiting();
+        }
       } else {
         this.drainGroup(groupJid);
       }
