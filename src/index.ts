@@ -5,6 +5,8 @@ import {
   ASSISTANT_NAME,
   DATA_DIR,
   IDLE_TIMEOUT,
+  PERSISTENT_MAIN_CONTAINER,
+  PERSISTENT_RESTART_DELAY,
   POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
@@ -187,10 +189,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     'Processing messages',
   );
 
-  // Track idle timer for closing stdin when agent is idle
+  // Track idle timer for closing stdin when agent is idle.
+  // Persistent containers never idle-kill — they stay alive between messages.
+  const isPersistent = queue.isPersistent(chatJid);
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   const resetIdleTimer = () => {
+    if (isPersistent) return; // persistent containers don't idle-kill
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
       logger.debug(
@@ -466,6 +471,77 @@ function recoverPendingMessages(): void {
   }
 }
 
+/**
+ * Start a persistent container for the main group. The container stays alive
+ * between messages — new messages are piped via IPC instead of spawning fresh
+ * containers. Auto-respawns on crash with backoff.
+ */
+function startPersistentContainer(chatJid: string): void {
+  const group = registeredGroups[chatJid];
+  if (!group) return;
+
+  queue.markPersistent(chatJid);
+  let consecutiveFailures = 0;
+  let lastSpawnTime = 0;
+  const MAX_FAILURES = 5;
+
+  const spawn = () => {
+    if (queue.isShuttingDown()) return;
+
+    lastSpawnTime = Date.now();
+    logger.info(
+      { group: group.name, chatJid, attempt: consecutiveFailures },
+      'Starting persistent container',
+    );
+
+    // enqueueMessageCheck triggers processGroupMessages → runAgent → container.
+    // The container stays alive because isPersistent skips the idle timer.
+    queue.enqueueMessageCheck(chatJid);
+  };
+
+  // Watch for container exit to respawn.
+  // Runs on a slow poll — only checks every 5s so it's lightweight.
+  const monitor = setInterval(() => {
+    if (queue.isShuttingDown()) {
+      clearInterval(monitor);
+      return;
+    }
+    if (!queue.isPersistent(chatJid)) {
+      clearInterval(monitor);
+      return;
+    }
+
+    if (!queue.isActive(chatJid) && Date.now() - lastSpawnTime > 10_000) {
+      // Container is not active and enough time has passed since spawn
+      const uptime = Date.now() - lastSpawnTime;
+      if (uptime > 60_000) {
+        // Ran for >1min — healthy exit, reset failure count
+        consecutiveFailures = 0;
+      } else {
+        consecutiveFailures++;
+      }
+
+      if (consecutiveFailures >= MAX_FAILURES) {
+        logger.error(
+          { group: group.name, failures: consecutiveFailures },
+          'Persistent container failed too many times, falling back to ephemeral mode',
+        );
+        clearInterval(monitor);
+        return;
+      }
+
+      const delay = PERSISTENT_RESTART_DELAY * Math.max(1, consecutiveFailures);
+      logger.warn(
+        { group: group.name, delay, attempt: consecutiveFailures, uptime },
+        'Persistent container exited, respawning',
+      );
+      setTimeout(spawn, delay);
+    }
+  }, 5000);
+
+  spawn();
+}
+
 function ensureContainerSystemRunning(): void {
   ensureContainerRuntimeRunning();
   cleanupOrphans();
@@ -700,6 +776,22 @@ async function main(): Promise<void> {
       writeGroupsSnapshot(gf, im, ag, rj),
   });
   queue.setProcessMessagesFn(processGroupMessages);
+
+  // Start persistent container for main group before processing recovery/messages.
+  // This pre-spawns the container so it's ready when messages arrive (no cold start).
+  if (PERSISTENT_MAIN_CONTAINER) {
+    for (const [jid, group] of Object.entries(registeredGroups)) {
+      if (group.isMain) {
+        logger.info(
+          { group: group.name, jid },
+          'Persistent main container enabled',
+        );
+        startPersistentContainer(jid);
+        break;
+      }
+    }
+  }
+
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');

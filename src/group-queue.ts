@@ -25,6 +25,7 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  persistent: boolean;
 }
 
 export class GroupQueue {
@@ -49,6 +50,7 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        persistent: false,
       };
       this.groups.set(groupJid, state);
     }
@@ -57,6 +59,25 @@ export class GroupQueue {
 
   setProcessMessagesFn(fn: (groupJid: string) => Promise<boolean>): void {
     this.processMessagesFn = fn;
+  }
+
+  markPersistent(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+    state.persistent = true;
+  }
+
+  isPersistent(groupJid: string): boolean {
+    const state = this.getGroup(groupJid);
+    return state.persistent;
+  }
+
+  isActive(groupJid: string): boolean {
+    const state = this.getGroup(groupJid);
+    return state.active;
+  }
+
+  isShuttingDown(): boolean {
+    return this.shuttingDown;
   }
 
   enqueueMessageCheck(groupJid: string): void {
@@ -148,6 +169,11 @@ export class GroupQueue {
   notifyIdle(groupJid: string): void {
     const state = this.getGroup(groupJid);
     state.idleWaiting = true;
+    if (state.persistent) {
+      // Persistent containers are never preempted for tasks.
+      // Tasks will wait for an ephemeral container slot.
+      return;
+    }
     if (state.pendingTasks.length > 0) {
       this.closeStdin(groupJid);
     }
@@ -227,7 +253,15 @@ export class GroupQueue {
       state.containerName = null;
       state.groupFolder = null;
       this.activeCount--;
-      this.drainGroup(groupJid);
+
+      if (state.persistent) {
+        // Persistent container exited — caller (index.ts) handles respawn.
+        // Don't drain tasks/messages through this group; just free the slot.
+        logger.info({ groupJid }, 'Persistent container exited, awaiting respawn from caller');
+        this.drainWaiting();
+      } else {
+        this.drainGroup(groupJid);
+      }
     }
   }
 
@@ -287,6 +321,13 @@ export class GroupQueue {
     if (this.shuttingDown) return;
 
     const state = this.getGroup(groupJid);
+
+    // Persistent groups never drain — they stay alive.
+    // Just free slots for other groups.
+    if (state.persistent) {
+      this.drainWaiting();
+      return;
+    }
 
     // Tasks first (they won't be re-discovered from SQLite like messages)
     if (state.pendingTasks.length > 0) {
@@ -352,6 +393,10 @@ export class GroupQueue {
     // This prevents WhatsApp reconnection restarts from killing working agents.
     const activeContainers: string[] = [];
     for (const [jid, state] of this.groups) {
+      if (state.persistent && state.active) {
+        // Signal persistent containers to shut down gracefully
+        this.closeStdin(jid);
+      }
       if (state.process && !state.process.killed && state.containerName) {
         activeContainers.push(state.containerName);
       }
