@@ -411,7 +411,23 @@ The self-build pipeline has its own Discord bot identity so progress messages ap
 DISCORD_BUILDER_BOT_TOKEN=your-mini-daemon-bot-token
 ```
 
-When set, all self-build progress messages, embeds (success/failure), and heartbeat updates are sent through the Mini-Daemon bot client (`src/builder-bot.ts`). The client connects on-demand when a build starts and disconnects after cleanup. If no builder token is configured, messages fall back to the main Daemon bot.
+When set, all self-build progress messages, embeds (success/failure), and heartbeat updates are sent through the Mini-Daemon bot client (`src/builder-bot.ts`). The client connects on-demand when a build starts and disconnects after the final embed is sent. If no builder token is configured, messages fall back to the main Daemon bot.
+
+#### Smart Reload
+
+After a successful merge, the self-build pipeline analyzes which files changed and decides whether a full service restart is needed:
+
+| Changed Files | Action |
+|--------------|--------|
+| `groups/**/*` (CLAUDE.md, SOUL.md, etc.) | No restart — read fresh each session |
+| `container/**/*` (agent-runner source) | No restart — isolated per-session |
+| `docs/**/*`, `CLAUDE.md`, `.claude/**/*` | No restart — workspace files |
+| `src/**/*.ts` (compiled host source) | Full restart required |
+| `package.json`, `package-lock.json` | Full restart required |
+| `container/Dockerfile`, `container/build.sh` | Full restart required |
+| `tsconfig.json` | Full restart required |
+
+The success embed includes a "Changed Files" field and an "Action" field indicating whether a restart was triggered. Status is written as `merged+restarting` or `merged+hot-reload`.
 
 ### Changing the Assistant Name
 

@@ -1140,11 +1140,70 @@ export async function processTaskIpc(
             /* nothing to commit */
           }
 
+          // Determine which files changed BEFORE merging (for smart reload)
+          const preMergeHead = execSync('git rev-parse HEAD', {
+            cwd,
+            encoding: 'utf-8',
+          }).trim();
+
           execSync(`git merge ${branchName} --no-edit`, { cwd });
 
-          // Clean up the worktree before restarting
-          cleanup();
+          // Get list of changed files between pre-merge HEAD and current HEAD
+          const changedFiles = execSync(
+            `git diff --name-only ${preMergeHead} HEAD`,
+            { cwd, encoding: 'utf-8' },
+          )
+            .trim()
+            .split('\n')
+            .filter(Boolean);
 
+          // Determine if a full service restart is needed based on changed files.
+          // Hot-reloadable: workspace files (groups/), container agent source,
+          // docs, CLAUDE.md, .claude/ skills, config files read at runtime.
+          // Restart-required: compiled src/, package.json deps, Dockerfile.
+          const needsRestart = changedFiles.some((f) => {
+            // Compiled host source code — requires restart
+            if (f.startsWith('src/')) return true;
+            // Dependency changes
+            if (f === 'package.json' || f === 'package-lock.json') return true;
+            // Container image changes (need rebuild + restart)
+            if (f === 'container/Dockerfile' || f === 'container/build.sh')
+              return true;
+            // tsconfig changes affect compiled output
+            if (f === 'tsconfig.json') return true;
+            return false;
+          });
+
+          // Clean up the worktree AFTER determining changed files but BEFORE
+          // sending the result embed. Don't disconnect builder bot yet — we
+          // need it for the embed.
+          try {
+            if (worktreeDir && fs.existsSync(worktreeDir)) {
+              execSync(`git worktree remove --force ${worktreeDir}`, { cwd });
+            }
+          } catch (wtErr) {
+            logger.warn(
+              { err: wtErr, worktreeDir },
+              'Mini-Daemon: worktree remove failed',
+            );
+            try {
+              fs.rmSync(worktreeDir, { recursive: true, force: true });
+              execSync('git worktree prune', { cwd });
+            } catch {
+              /* last resort */
+            }
+          }
+          try {
+            if (branchName) {
+              execSync(`git branch -D ${branchName}`, { cwd, stdio: 'pipe' });
+            }
+          } catch {
+            /* branch may not exist */
+          }
+          if (stderrFlushTimer) clearTimeout(stderrFlushTimer);
+          if (heartbeatInterval) clearInterval(heartbeatInterval);
+
+          const reloadAction = needsRestart ? 'Restarting now...' : 'No restart needed — changes are hot-reloadable.';
           const successEmbed: EmbedData = {
             title: '🔧 Mini-Daemon — Build Complete',
             description: `Changes merged from worktree branch \`${branchName}\`. Build and tests passed.`,
@@ -1155,8 +1214,20 @@ export async function processTaskIpc(
                 value: buildPrompt.slice(0, 200),
                 inline: false,
               },
+              {
+                name: 'Changed Files',
+                value: changedFiles.length <= 10
+                  ? changedFiles.map((f) => `\`${f}\``).join('\n')
+                  : `${changedFiles.length} files changed`,
+                inline: false,
+              },
+              {
+                name: 'Action',
+                value: reloadAction,
+                inline: false,
+              },
             ],
-            footer: 'Restarting now...',
+            footer: needsRestart ? 'Restarting now...' : 'Hot-reload complete',
           };
           if (buildChatJid && useBuilderBot) {
             await builderSendEmbed(buildChatJid, successEmbed);
@@ -1164,18 +1235,29 @@ export async function processTaskIpc(
             await deps.sendEmbed(buildChatJid, successEmbed);
           } else {
             await sendAs(
-              `All done! Changes merged from \`${branchName}\`, build + tests passed. Restarting now...`,
+              `All done! Changes merged from \`${branchName}\`, build + tests passed. ${reloadAction}`,
             );
           }
 
-          writeStatus('completed', 'merged');
+          // NOW disconnect the builder bot (after embed is sent)
+          if (useBuilderBot) disconnectBuilderBot();
+
+          writeStatus('completed', needsRestart ? 'merged+restarting' : 'merged+hot-reload');
           selfBuildInProgress = false;
           builderProcess = null;
-          exec('systemctl --user restart nanoclaw', { timeout: 15_000 });
+
+          if (needsRestart) {
+            exec('systemctl --user restart nanoclaw', { timeout: 15_000 });
+          } else {
+            logger.info(
+              { changedFiles },
+              'Self-build: hot-reload — no restart needed',
+            );
+          }
         } catch (err) {
           const errMsg =
             err instanceof Error ? err.message.slice(-500) : String(err);
-          cleanup();
+          // Send error embed BEFORE disconnecting the builder bot
           const errEmbed: EmbedData = {
             title: '🔧 Mini-Daemon — Error',
             description:
@@ -1198,6 +1280,8 @@ export async function processTaskIpc(
               `Something went wrong — worktree cleaned up, main untouched.\n\`\`\`\n${errMsg}\n\`\`\``,
             );
           }
+          // NOW clean up (disconnects builder bot)
+          cleanup();
           writeStatus('failed', errMsg);
           selfBuildInProgress = false;
           builderProcess = null;
