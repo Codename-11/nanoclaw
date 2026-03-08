@@ -63,10 +63,11 @@ The Discord channel supports rich messaging beyond plain text:
 - **Attachments (receive):** Incoming attachments are downloaded to `data/ipc/{group}/input/` and accessible at `/workspace/ipc/input/{filename}` inside the container
 - **Rich Embeds:** `Channel.sendEmbed(jid, embed)` — structured cards with title, description, color, fields, images. IPC `type: "embed"`
 - **Thread Support:** Messages from threads route to the parent channel's group; replies go back to the thread automatically
+- **Reactions:** `Channel.addReaction(jid, messageId, emoji)` — agents add emoji reactions via IPC `type: "reaction"`
 - **Self-Update:** IPC `type: "run_host_command"` (main-only) supports `update`, `restart`, `status` commands
 - **Self-Build:** IPC `type: "run_claude_session"` (main-only) spawns a Claude Code sidecar ("Builder") on the host to modify NanoClaw's own codebase with git safety, build validation, and auto-rollback
 
-Discord bot requires these permissions: Send Messages, Read Message History, View Channels, Attach Files, Embed Links, Send Messages in Threads.
+Discord bot requires these permissions: Send Messages, Read Message History, View Channels, Attach Files, Embed Links, Send Messages in Threads, Add Reactions.
 
 ## Container Agent Capabilities
 

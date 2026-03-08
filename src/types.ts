@@ -113,6 +113,8 @@ export interface Channel {
   sendAttachment?(jid: string, filePath: string, caption?: string): Promise<void>;
   // Optional: send a rich embed.
   sendEmbed?(jid: string, embed: EmbedData): Promise<void>;
+  // Optional: add an emoji reaction to a message.
+  addReaction?(jid: string, messageId: string, emoji: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

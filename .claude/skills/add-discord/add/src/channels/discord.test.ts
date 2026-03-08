@@ -42,6 +42,7 @@ vi.mock('discord.js', () => {
     GuildMessages: 2,
     MessageContent: 4,
     DirectMessages: 8,
+    GuildMessageReactions: 16,
   };
 
   class MockClient {

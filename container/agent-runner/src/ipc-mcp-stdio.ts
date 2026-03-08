@@ -364,6 +364,29 @@ server.tool(
 );
 
 server.tool(
+  'add_reaction',
+  'Add an emoji reaction to a message in the chat. Use standard emoji or custom Discord emoji format.',
+  {
+    message_id: z.string().describe('The Discord message ID to react to'),
+    emoji: z.string().describe('Emoji to react with (e.g., "\ud83d\udc4d", "\u2764\ufe0f", "\ud83c\udf89")'),
+  },
+  async (args) => {
+    const data = {
+      type: 'reaction',
+      chatJid,
+      messageId: args.message_id,
+      emoji: args.emoji,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Reaction ${args.emoji} added to message ${args.message_id}.` }] };
+  },
+);
+
+server.tool(
   'send_embed',
   'Send a rich embed message (Discord only). Creates a structured card with title, description, fields, colors, and images.',
   {

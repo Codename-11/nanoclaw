@@ -15,6 +15,7 @@ export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
   sendAttachment?: (jid: string, filePath: string, caption?: string) => Promise<void>;
   sendEmbed?: (jid: string, embed: EmbedData) => Promise<void>;
+  addReaction?: (jid: string, messageId: string, emoji: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -178,6 +179,17 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC embed sent',
+                  );
+                } else if (
+                  data.type === 'reaction' &&
+                  data.messageId &&
+                  data.emoji &&
+                  deps.addReaction
+                ) {
+                  await deps.addReaction(data.chatJid, data.messageId, data.emoji);
+                  logger.info(
+                    { chatJid: data.chatJid, sourceGroup, messageId: data.messageId },
+                    'IPC reaction added',
                   );
                 }
               } else if (data.chatJid && !authorized) {
