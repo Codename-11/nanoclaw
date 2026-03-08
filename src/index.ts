@@ -579,7 +579,11 @@ async function main(): Promise<void> {
           );
         } else {
           logger.warn(
-            { jid, channelCount: channels.length, channelNames: channels.map((c) => c.name) },
+            {
+              jid,
+              channelCount: channels.length,
+              channelNames: channels.map((c) => c.name),
+            },
             'No channel found for main group JID — startup message not sent',
           );
         }

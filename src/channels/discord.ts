@@ -395,12 +395,17 @@ export class DiscordChannel implements Channel {
     if (!this.client) throw new Error('Discord client not initialized');
     const channel = await this.client.channels.fetch(channelId);
     if (!channel || !('bulkDelete' in channel)) {
-      throw new Error(`Channel ${channelId} not found or doesn't support bulk delete`);
+      throw new Error(
+        `Channel ${channelId} not found or doesn't support bulk delete`,
+      );
     }
     const textChannel = channel as TextChannel;
     const clamped = Math.min(Math.max(1, count), 100);
     const deleted = await textChannel.bulkDelete(clamped, true);
-    logger.info({ channelId, requested: clamped, deleted: deleted.size }, 'Discord bulk delete');
+    logger.info(
+      { channelId, requested: clamped, deleted: deleted.size },
+      'Discord bulk delete',
+    );
     return deleted.size;
   }
 
@@ -425,7 +430,10 @@ export class DiscordChannel implements Channel {
       type: channelType,
       topic: channelType === ChannelType.GuildText ? topic : undefined,
     });
-    logger.info({ id: created.id, name: created.name, type }, 'Discord channel created');
+    logger.info(
+      { id: created.id, name: created.name, type },
+      'Discord channel created',
+    );
     return { id: created.id, name: created.name };
   }
 
@@ -442,7 +450,9 @@ export class DiscordChannel implements Channel {
     logger.info({ channelId, options }, 'Discord channel edited');
   }
 
-  async getMembers(): Promise<{ id: string; username: string; displayName: string; bot: boolean }[]> {
+  async getMembers(): Promise<
+    { id: string; username: string; displayName: string; bot: boolean }[]
+  > {
     if (!this.client) throw new Error('Discord client not initialized');
     const guild = this.client.guilds.cache.first();
     if (!guild) throw new Error('Bot is not in any guild');
