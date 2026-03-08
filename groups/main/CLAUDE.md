@@ -60,6 +60,14 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
+### Auto-Memory
+At the end of meaningful conversations, proactively save important facts you learned:
+- User preferences/style → `user-profile.md`
+- Project details → `projects/{name}.md`
+- Decisions, patterns → relevant workspace files
+
+Don't wait to be asked — if you learned something worth remembering, save it before responding.
+
 ## Discord Rich Messaging
 
 - **Reactions:** `mcp__nanoclaw__add_reaction` — add emoji reactions to messages. Use standard emoji or custom Discord emoji format. Requires the Discord message ID.
