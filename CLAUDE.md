@@ -68,6 +68,10 @@ The Discord channel supports rich messaging beyond plain text:
 
 Discord bot requires these permissions: Send Messages, Read Message History, View Channels, Attach Files, Embed Links, Send Messages in Threads.
 
+## Container Agent Capabilities
+
+- **Self-Diagnostics:** `mcp__nanoclaw__self_diagnose` — agents can check their own health (recent log errors/warnings, IPC queue depth, disk usage, task state, CLAUDE.md status). Runs locally inside the container with no IPC needed.
+
 ## Troubleshooting
 
 **WhatsApp not connecting after upgrade:** WhatsApp is now a separate skill, not bundled in core. Run `/add-whatsapp` (or `npx tsx scripts/apply-skill.ts .claude/skills/add-whatsapp && npm run build`) to install it. Existing auth credentials and groups are preserved.

@@ -41,7 +41,7 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.",
+  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
   {
     text: z.string().describe('The message text to send'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
@@ -64,7 +64,7 @@ server.tool(
 
 server.tool(
   'schedule_task',
-  `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools.
+  `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools. Returns the task ID for future reference. To modify an existing task, use update_task instead.
 
 CONTEXT MODE - Choose based on task type:
 \u2022 "group": Task runs in the group's conversation context, with access to chat history. Use for tasks that need context about ongoing discussions, user preferences, or recent interactions.
@@ -130,8 +130,11 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     // Non-main groups can only schedule for themselves
     const targetJid = isMain && args.target_group_jid ? args.target_group_jid : chatJid;
 
+    const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
     const data = {
       type: 'schedule_task',
+      taskId,
       prompt: args.prompt,
       schedule_type: args.schedule_type,
       schedule_value: args.schedule_value,
@@ -141,10 +144,10 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       timestamp: new Date().toISOString(),
     };
 
-    const filename = writeIpcFile(TASKS_DIR, data);
+    writeIpcFile(TASKS_DIR, data);
 
     return {
-      content: [{ type: 'text' as const, text: `Task scheduled (${filename}): ${args.schedule_type} - ${args.schedule_value}` }],
+      content: [{ type: 'text' as const, text: `Task ${taskId} scheduled: ${args.schedule_type} - ${args.schedule_value}` }],
     };
   },
 );
@@ -241,6 +244,56 @@ server.tool(
     writeIpcFile(TASKS_DIR, data);
 
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.` }] };
+  },
+);
+
+server.tool(
+  'update_task',
+  'Update an existing scheduled task. Only provided fields are changed; omitted fields stay the same.',
+  {
+    task_id: z.string().describe('The task ID to update'),
+    prompt: z.string().optional().describe('New prompt for the task'),
+    schedule_type: z.enum(['cron', 'interval', 'once']).optional().describe('New schedule type'),
+    schedule_value: z.string().optional().describe('New schedule value (see schedule_task for format)'),
+  },
+  async (args) => {
+    // Validate schedule_value if provided
+    if (args.schedule_type === 'cron' || (!args.schedule_type && args.schedule_value)) {
+      if (args.schedule_value) {
+        try {
+          CronExpressionParser.parse(args.schedule_value);
+        } catch {
+          return {
+            content: [{ type: 'text' as const, text: `Invalid cron: "${args.schedule_value}".` }],
+            isError: true,
+          };
+        }
+      }
+    }
+    if (args.schedule_type === 'interval' && args.schedule_value) {
+      const ms = parseInt(args.schedule_value, 10);
+      if (isNaN(ms) || ms <= 0) {
+        return {
+          content: [{ type: 'text' as const, text: `Invalid interval: "${args.schedule_value}".` }],
+          isError: true,
+        };
+      }
+    }
+
+    const data: Record<string, string | undefined> = {
+      type: 'update_task',
+      taskId: args.task_id,
+      groupFolder,
+      isMain: String(isMain),
+      timestamp: new Date().toISOString(),
+    };
+    if (args.prompt !== undefined) data.prompt = args.prompt;
+    if (args.schedule_type !== undefined) data.schedule_type = args.schedule_type;
+    if (args.schedule_value !== undefined) data.schedule_value = args.schedule_value;
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} update requested.` }] };
   },
 );
 
@@ -493,6 +546,147 @@ server.tool(
 
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(info, null, 2) }],
+    };
+  },
+);
+
+server.tool(
+  'self_diagnose',
+  'Run a self-diagnostic check. Scans recent container logs for errors/warnings, checks IPC queue health, reports disk usage, reads current tasks, and verifies CLAUDE.md. No IPC needed — reads local container files only.',
+  {},
+  async () => {
+    const report: {
+      timestamp: string;
+      logs: { file: string; errors: string[]; warnings: string[] }[];
+      ipc_queue: { pending_messages: number; pending_tasks: number };
+      disk_usage: { path: string; size_bytes: number | null; error?: string };
+      current_tasks: { count: number; tasks: unknown[] | null; error?: string };
+      claude_md: { exists: boolean; size_bytes: number | null; path: string };
+      overall_status: 'healthy' | 'degraded' | 'error';
+      issues: string[];
+    } = {
+      timestamp: new Date().toISOString(),
+      logs: [],
+      ipc_queue: { pending_messages: 0, pending_tasks: 0 },
+      disk_usage: { path: '/workspace/group/', size_bytes: null },
+      current_tasks: { count: 0, tasks: null },
+      claude_md: { exists: false, size_bytes: null, path: '/workspace/group/CLAUDE.md' },
+      overall_status: 'healthy',
+      issues: [],
+    };
+
+    // 1. Scan recent log files for errors/warnings
+    const logsDir = '/workspace/group/logs/';
+    try {
+      if (fs.existsSync(logsDir)) {
+        const logFiles = fs.readdirSync(logsDir)
+          .filter((f: string) => f.endsWith('.log'))
+          .sort()
+          .slice(-3); // last 3 log files
+
+        for (const file of logFiles) {
+          const logPath = path.join(logsDir, file);
+          const content = fs.readFileSync(logPath, 'utf-8');
+          const lines = content.split('\n');
+          const errors: string[] = [];
+          const warnings: string[] = [];
+
+          for (const line of lines) {
+            const lower = line.toLowerCase();
+            if (lower.includes('error') || lower.includes('exception') || lower.includes('fatal')) {
+              errors.push(line.trim().slice(0, 200));
+            } else if (lower.includes('warn')) {
+              warnings.push(line.trim().slice(0, 200));
+            }
+          }
+
+          report.logs.push({
+            file,
+            errors: errors.slice(-10), // last 10 errors per file
+            warnings: warnings.slice(-10),
+          });
+
+          if (errors.length > 0) {
+            report.issues.push(`${errors.length} error(s) found in ${file}`);
+          }
+        }
+      } else {
+        report.issues.push('Logs directory not found at ' + logsDir);
+      }
+    } catch (err) {
+      report.issues.push(`Failed to read logs: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // 2. Check IPC queue health
+    try {
+      if (fs.existsSync(MESSAGES_DIR)) {
+        const msgFiles = fs.readdirSync(MESSAGES_DIR).filter((f: string) => f.endsWith('.json'));
+        report.ipc_queue.pending_messages = msgFiles.length;
+        if (msgFiles.length > 10) {
+          report.issues.push(`${msgFiles.length} pending IPC messages (possible backlog)`);
+        }
+      }
+    } catch { /* ignore */ }
+
+    try {
+      if (fs.existsSync(TASKS_DIR)) {
+        const taskFiles = fs.readdirSync(TASKS_DIR).filter((f: string) => f.endsWith('.json'));
+        report.ipc_queue.pending_tasks = taskFiles.length;
+        if (taskFiles.length > 10) {
+          report.issues.push(`${taskFiles.length} pending IPC tasks (possible backlog)`);
+        }
+      }
+    } catch { /* ignore */ }
+
+    // 3. Disk usage of /workspace/group/
+    try {
+      const { execSync } = await import('child_process');
+      const duOutput = execSync('du -sb /workspace/group/ 2>/dev/null || echo "0\t/workspace/group/"', { encoding: 'utf-8' });
+      const sizeStr = duOutput.split('\t')[0].trim();
+      report.disk_usage.size_bytes = parseInt(sizeStr, 10) || 0;
+    } catch (err) {
+      report.disk_usage.error = err instanceof Error ? err.message : String(err);
+    }
+
+    // 4. Read current tasks
+    const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
+    try {
+      if (fs.existsSync(tasksFile)) {
+        const tasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
+        report.current_tasks.count = Array.isArray(tasks) ? tasks.length : 0;
+        report.current_tasks.tasks = tasks;
+      }
+    } catch (err) {
+      report.current_tasks.error = err instanceof Error ? err.message : String(err);
+      report.issues.push('Failed to read current_tasks.json');
+    }
+
+    // 5. Check CLAUDE.md
+    const claudeMdPath = '/workspace/group/CLAUDE.md';
+    try {
+      if (fs.existsSync(claudeMdPath)) {
+        const stat = fs.statSync(claudeMdPath);
+        report.claude_md.exists = true;
+        report.claude_md.size_bytes = stat.size;
+        if (stat.size === 0) {
+          report.issues.push('CLAUDE.md exists but is empty');
+        }
+      } else {
+        report.issues.push('CLAUDE.md not found — group has no memory file');
+      }
+    } catch { /* ignore */ }
+
+    // 6. Determine overall status
+    if (report.issues.length === 0) {
+      report.overall_status = 'healthy';
+    } else if (report.issues.some(i => i.includes('error') || i.includes('Failed'))) {
+      report.overall_status = 'error';
+    } else {
+      report.overall_status = 'degraded';
+    }
+
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(report, null, 2) }],
     };
   },
 );

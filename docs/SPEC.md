@@ -638,6 +638,7 @@ The `nanoclaw` MCP server is created dynamically per agent call with the current
 | `send_attachment` | Send a file attachment to the group (Discord) |
 | `send_embed` | Send a rich embed message (Discord) |
 | `run_host_command` | Run a predefined host command: `update`, `restart`, `status` (main only) |
+| `self_diagnose` | Run container self-diagnostics (logs, IPC queues, disk, tasks, CLAUDE.md) |
 
 ---
 
