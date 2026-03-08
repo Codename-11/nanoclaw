@@ -70,7 +70,11 @@ The Discord channel supports rich messaging beyond plain text:
 
 Discord bot requires these permissions: Send Messages, Read Message History, View Channels, Attach Files, Embed Links, Send Messages in Threads, Add Reactions.
 
-**Typing Indicator:** Discord `setTyping()` refreshes every 7 seconds via interval, keeping "typing..." visible until the response is sent. Intervals are tracked per-JID and cleaned up on `setTyping(false)` or `disconnect()`.
+**Typing Indicator:** Discord `setTyping()` refreshes every 7 seconds via interval, keeping "typing..." visible until the response is sent. Intervals are tracked per-JID and cleaned up on `setTyping(false)` or `disconnect()`. Additionally, `sendMessage()` auto-clears the typing indicator after each message is confirmed sent, ensuring typing never persists after a response.
+
+**Startup Message:** After all channels connect, Daemon sends "🖤 Back online!" to the main Discord channel so users know the service is live.
+
+**Builder Output Filtering:** Mini-Daemon only relays meaningful content to Discord: startup/progress text and completion/failure embeds. Tool calls and stderr are logged but not sent to Discord to reduce noise.
 
 ## Agent Boot Context
 

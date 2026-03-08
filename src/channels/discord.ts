@@ -259,6 +259,10 @@ export class DiscordChannel implements Channel {
       }
     }
     logger.info({ jid, length: text.length }, 'Discord message sent');
+
+    // Clear typing indicator after message is confirmed sent.
+    // This ensures the "typing..." indicator doesn't persist after the response.
+    await this.setTyping(jid, false);
   }
 
   async sendAttachment(

@@ -427,7 +427,9 @@ async function startMessageLoop(): Promise<void> {
             lastAgentTimestamp[chatJid] =
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
-            // Show typing indicator while the container processes the piped message
+            // Show typing indicator while the container processes the piped message.
+            // The indicator is cleared by processGroupMessages' finally block
+            // when the agent finishes, or by sendMessage clearing it after send.
             channel
               .setTyping?.(chatJid, true)
               ?.catch((err) =>
@@ -561,6 +563,19 @@ async function main(): Promise<void> {
   if (channels.length === 0) {
     logger.fatal('No channels connected');
     process.exit(1);
+  }
+
+  // Send startup acknowledgement to main group
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    if (group.isMain) {
+      const ch = findChannel(channels, jid);
+      if (ch) {
+        ch.sendMessage(jid, '🖤 Back online!').catch((err) =>
+          logger.warn({ jid, err }, 'Failed to send startup message'),
+        );
+      }
+      break;
+    }
   }
 
   // Start subsystems (independently of connection handler)

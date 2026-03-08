@@ -757,7 +757,6 @@ export async function processTaskIpc(
       (async () => {
         let branchName = '';
         let worktreeDir = '';
-        let stderrFlushTimer: ReturnType<typeof setTimeout> | null = null;
         let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 
         // Connect the Mini-Daemon builder bot so messages appear under its own identity.
@@ -819,7 +818,7 @@ export async function processTaskIpc(
           } catch {
             /* branch may not exist */
           }
-          if (stderrFlushTimer) clearTimeout(stderrFlushTimer);
+
           if (heartbeatInterval) clearInterval(heartbeatInterval);
         };
 
@@ -913,28 +912,23 @@ export async function processTaskIpc(
 
           await sendAs(`Builder started (PID ${claude.pid}).`);
 
-          // Batched progress updates
+          // Mini-Daemon output filtering: only relay meaningful text to Discord.
+          // Tool calls are logged but NOT sent to Discord to avoid spam.
+          // Only text blocks and the final result are relayed.
           let textBuffer = '';
-          let toolBuffer: string[] = [];
           let flushTimer: ReturnType<typeof setTimeout> | null = null;
           const FLUSH_DELAY = 5000;
 
           const flushBuffers = async () => {
             flushTimer = null;
-            const parts: string[] = [];
-            if (toolBuffer.length > 0) {
-              parts.push(`⚙️ ${toolBuffer.join(', ')}`);
-              toolBuffer = [];
-            }
             if (textBuffer.trim()) {
               const msg =
                 textBuffer.length > 1500
                   ? textBuffer.slice(0, 1500) + '...'
                   : textBuffer;
-              parts.push(msg);
               textBuffer = '';
+              await sendAs(msg);
             }
-            if (parts.length > 0) await sendAs(parts.join('\n'));
           };
 
           const scheduleFlush = () => {
@@ -963,19 +957,14 @@ export async function processTaskIpc(
                       textBuffer += block.text;
                       scheduleFlush();
                     }
+                    // Tool calls are intentionally NOT relayed to Discord.
+                    // They are still logged via appendLog in sendAs for debugging.
                     if (block.type === 'tool_use') {
                       const toolName = block.name || 'tool';
-                      const input = block.input || {};
-                      let detail = '';
-                      if (input.file_path) {
-                        detail = `(${input.file_path.split('/').pop()})`;
-                      } else if (toolName === 'Bash' && input.command) {
-                        detail = `(\`${input.command.slice(0, 40)}\`)`;
-                      } else if (input.pattern) {
-                        detail = `(${input.pattern})`;
-                      }
-                      toolBuffer.push(`${toolName}${detail}`);
-                      scheduleFlush();
+                      logger.debug(
+                        { builder: true, tool: toolName },
+                        'Builder tool call (not relayed)',
+                      );
                     }
                   }
                 }
@@ -999,26 +988,13 @@ export async function processTaskIpc(
             }
           });
 
-          // Batch stderr and forward to Discord
-          let stderrBuffer = '';
+          // Log stderr but don't relay to Discord (reduces spam).
+          // Errors are captured in the final result or build-fail embed.
           claude.stderr.on('data', (chunk: Buffer) => {
             const text = chunk.toString().trim();
             logger.debug({ builder: true }, text);
             lastOutputTime = Date.now();
-            stderrBuffer += text + '\n';
-            if (!stderrFlushTimer) {
-              stderrFlushTimer = setTimeout(async () => {
-                stderrFlushTimer = null;
-                if (stderrBuffer.trim()) {
-                  const msg =
-                    stderrBuffer.length > 500
-                      ? '...' + stderrBuffer.slice(-500)
-                      : stderrBuffer;
-                  await sendAs(`⚠️ stderr:\n\`\`\`\n${msg.trim()}\n\`\`\``);
-                  stderrBuffer = '';
-                }
-              }, 10_000);
-            }
+            appendLog(`stderr: ${text}`);
           });
 
           // Heartbeat (max 5)
@@ -1063,7 +1039,7 @@ export async function processTaskIpc(
           });
 
           if (heartbeatInterval) clearInterval(heartbeatInterval);
-          if (stderrFlushTimer) clearTimeout(stderrFlushTimer);
+
           builderProcess = null;
           if (flushTimer) {
             clearTimeout(flushTimer);
@@ -1214,7 +1190,7 @@ export async function processTaskIpc(
           } catch {
             /* branch may not exist */
           }
-          if (stderrFlushTimer) clearTimeout(stderrFlushTimer);
+
           if (heartbeatInterval) clearInterval(heartbeatInterval);
 
           const reloadAction = needsRestart

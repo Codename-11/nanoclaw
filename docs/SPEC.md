@@ -177,6 +177,8 @@ interface Channel {
 
 The `EmbedData` type supports `title`, `description`, `color`, `fields` (name/value/inline), `thumbnail`, `image`, `footer`, and `url`.
 
+**Typing indicator lifecycle:** Discord's `setTyping(jid, true)` starts a 7-second refresh interval. It is cleared in three places: (1) `processGroupMessages` finally block after agent completes, (2) `sendMessage()` auto-clears after each message is confirmed sent to Discord, and (3) `disconnect()` clears all intervals on shutdown.
+
 ### Self-Registration Pattern
 
 Channels self-register using a barrel-import pattern:
@@ -204,7 +206,7 @@ Channels self-register using a barrel-import pattern:
    // ... each skill adds its import here
    ```
 
-3. At startup, the orchestrator (`src/index.ts`) loops through registered channels and connects whichever ones return a valid instance:
+3. At startup, the orchestrator (`src/index.ts`) loops through registered channels and connects whichever ones return a valid instance. After all channels connect, it sends "🖤 Back online!" to the main group:
 
    ```typescript
    for (const name of getRegisteredChannelNames()) {
@@ -215,6 +217,7 @@ Channels self-register using a barrel-import pattern:
        channels.push(channel);
      }
    }
+   // Send startup message to main group
    ```
 
 ### Key Files
@@ -414,6 +417,8 @@ DISCORD_BUILDER_BOT_TOKEN=your-mini-daemon-bot-token
 ```
 
 When set, all self-build progress messages, embeds (success/failure), and heartbeat updates are sent through the Mini-Daemon bot client (`src/builder-bot.ts`). The client connects on-demand when a build starts and disconnects after the final embed is sent. Messages contain only the content itself — no "Mini-Daemon:" text prefix — since the bot's username/avatar already identifies the sender. If no builder token is configured, messages fall back to the main Daemon bot.
+
+**Output filtering:** Mini-Daemon only relays text blocks and the final result to Discord. Tool calls (`Bash`, `Read`, `Edit`, etc.) and stderr output are logged to the build log file but not sent to Discord, keeping the channel clean.
 
 The `.env` file is located using a two-step resolution: first `process.cwd()/.env`, then a fallback derived from the compiled file's location (`dist/env.js` → project root). This ensures the token is found even when the service runs with a non-standard working directory (e.g. systemd without `WorkingDirectory`). Discord env vars from `.env` are also forwarded into the builder sidecar's spawn environment.
 

@@ -36,7 +36,7 @@ Your output is sent to the user or group.
 You also have `mcp__nanoclaw__send_message` which sends a message immediately while you're still working. This is useful when you want to acknowledge a request before starting longer work.
 
 ### After Restart
-After any restart or coming back online, always send an immediate acknowledgement message: "🖤 Back online!" so the user knows you're live again.
+The host automatically sends "🖤 Back online!" to the main channel after all channels connect. You don't need to send it yourself — it's handled at the service level.
 
 ### Internal thoughts
 
