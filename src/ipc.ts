@@ -13,9 +13,17 @@ import { EmbedData, RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
-  sendAttachment?: (jid: string, filePath: string, caption?: string) => Promise<void>;
+  sendAttachment?: (
+    jid: string,
+    filePath: string,
+    caption?: string,
+  ) => Promise<void>;
   sendEmbed?: (jid: string, embed: EmbedData) => Promise<void>;
-  addReaction?: (jid: string, messageId: string, emoji: string) => Promise<void>;
+  addReaction?: (
+    jid: string,
+    messageId: string,
+    emoji: string,
+  ) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -133,8 +141,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
               // Authorization: verify this group can send to this chatJid
               const targetGroup = registeredGroups[data.chatJid];
               const authorized =
-                isMain ||
-                (targetGroup && targetGroup.folder === sourceGroup);
+                isMain || (targetGroup && targetGroup.folder === sourceGroup);
 
               if (data.chatJid && authorized) {
                 if (data.type === 'message' && data.text) {
@@ -186,9 +193,17 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   data.emoji &&
                   deps.addReaction
                 ) {
-                  await deps.addReaction(data.chatJid, data.messageId, data.emoji);
+                  await deps.addReaction(
+                    data.chatJid,
+                    data.messageId,
+                    data.emoji,
+                  );
                   logger.info(
-                    { chatJid: data.chatJid, sourceGroup, messageId: data.messageId },
+                    {
+                      chatJid: data.chatJid,
+                      sourceGroup,
+                      messageId: data.messageId,
+                    },
                     'IPC reaction added',
                   );
                 }
@@ -652,7 +667,9 @@ export async function processTaskIpc(
         let didStash = false;
 
         try {
-          await sendAs("I'm spinning up! Give me a sec to set up safety rails...");
+          await sendAs(
+            "I'm spinning up! Give me a sec to set up safety rails...",
+          );
 
           // Git safety net
           originalBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd })
@@ -682,15 +699,20 @@ export async function processTaskIpc(
           );
 
           // Spawn Claude Code as interactive sidecar with streaming output
-          const claude = spawn('claude', [
-            '--output-format', 'stream-json',
-            '--dangerously-skip-permissions',
-            '--verbose',
-          ], {
-            cwd,
-            stdio: ['pipe', 'pipe', 'pipe'],
-            env: { ...process.env },
-          });
+          const claude = spawn(
+            'claude',
+            [
+              '--output-format',
+              'stream-json',
+              '--dangerously-skip-permissions',
+              '--verbose',
+            ],
+            {
+              cwd,
+              stdio: ['pipe', 'pipe', 'pipe'],
+              env: { ...process.env },
+            },
+          );
 
           builderProcess = claude;
 
@@ -716,9 +738,10 @@ export async function processTaskIpc(
             }
 
             if (textBuffer.trim()) {
-              const msg = textBuffer.length > 1500
-                ? textBuffer.slice(0, 1500) + '...'
-                : textBuffer;
+              const msg =
+                textBuffer.length > 1500
+                  ? textBuffer.slice(0, 1500) + '...'
+                  : textBuffer;
               parts.push(msg);
               textBuffer = '';
             }
@@ -778,9 +801,10 @@ export async function processTaskIpc(
                   flushBuffers();
                   const resultText = event.result || '';
                   if (resultText && resultText.length > 0) {
-                    const truncated = resultText.length > 1500
-                      ? resultText.slice(0, 1500) + '...'
-                      : resultText;
+                    const truncated =
+                      resultText.length > 1500
+                        ? resultText.slice(0, 1500) + '...'
+                        : resultText;
                     sendAs(truncated);
                   }
                 }
@@ -851,7 +875,11 @@ export async function processTaskIpc(
             execSync(`git checkout ${originalBranch}`, { cwd });
             execSync(`git branch -D ${branchName}`, { cwd });
             if (didStash) {
-              try { execSync('git stash pop', { cwd }); } catch { /* */ }
+              try {
+                execSync('git stash pop', { cwd });
+              } catch {
+                /* */
+              }
             }
             await sendAs(
               `Build/test failed — rolled back.\n\`\`\`\n${errMsg}\n\`\`\``,
@@ -864,7 +892,11 @@ export async function processTaskIpc(
           execSync(`git checkout ${originalBranch}`, { cwd });
           execSync(`git merge ${branchName} --no-edit`, { cwd });
           if (didStash) {
-            try { execSync('git stash pop', { cwd }); } catch { /* */ }
+            try {
+              execSync('git stash pop', { cwd });
+            } catch {
+              /* */
+            }
           }
 
           await sendAs(
@@ -880,13 +912,25 @@ export async function processTaskIpc(
           try {
             if (branchName && originalBranch) {
               execSync(`git checkout ${originalBranch}`, { cwd });
-              try { execSync(`git branch -D ${branchName}`, { cwd }); } catch { /* */ }
+              try {
+                execSync(`git branch -D ${branchName}`, { cwd });
+              } catch {
+                /* */
+              }
             }
             if (didStash) {
-              try { execSync('git stash pop', { cwd }); } catch { /* */ }
+              try {
+                execSync('git stash pop', { cwd });
+              } catch {
+                /* */
+              }
             }
-          } catch { /* rollback failed */ }
-          await sendAs(`Something went wrong — rolled back.\n\`\`\`\n${errMsg}\n\`\`\``);
+          } catch {
+            /* rollback failed */
+          }
+          await sendAs(
+            `Something went wrong — rolled back.\n\`\`\`\n${errMsg}\n\`\`\``,
+          );
           selfBuildInProgress = false;
           builderProcess = null;
         }

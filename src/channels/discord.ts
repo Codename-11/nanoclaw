@@ -148,12 +148,19 @@ export class DiscordChannel implements Channel {
                 'Discord attachment downloaded',
               );
             } catch (err) {
-              logger.error({ att: att.name, err }, 'Failed to download Discord attachment');
+              logger.error(
+                { att: att.name, err },
+                'Failed to download Discord attachment',
+              );
               // Fall back to placeholder
-              attachmentDescriptions.push(this.attachmentPlaceholder(contentType, att.name));
+              attachmentDescriptions.push(
+                this.attachmentPlaceholder(contentType, att.name),
+              );
             }
           } else {
-            attachmentDescriptions.push(this.attachmentPlaceholder(contentType, att.name));
+            attachmentDescriptions.push(
+              this.attachmentPlaceholder(contentType, att.name),
+            );
           }
         }
 
@@ -182,7 +189,13 @@ export class DiscordChannel implements Channel {
 
       // Store chat metadata for discovery
       const isGroup = message.guild !== null;
-      this.opts.onChatMetadata(routingJid, timestamp, chatName, 'discord', isGroup);
+      this.opts.onChatMetadata(
+        routingJid,
+        timestamp,
+        chatName,
+        'discord',
+        isGroup,
+      );
 
       // Only deliver full message for registered groups
       if (!group) {
@@ -389,7 +402,10 @@ export class DiscordChannel implements Channel {
     }
   }
 
-  private attachmentPlaceholder(contentType: string, name?: string | null): string {
+  private attachmentPlaceholder(
+    contentType: string,
+    name?: string | null,
+  ): string {
     if (contentType.startsWith('image/')) return `[Image: ${name || 'image'}]`;
     if (contentType.startsWith('video/')) return `[Video: ${name || 'video'}]`;
     if (contentType.startsWith('audio/')) return `[Audio: ${name || 'audio'}]`;

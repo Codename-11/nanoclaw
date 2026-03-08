@@ -100,14 +100,38 @@ vi.mock('discord.js', () => {
 
   class EmbedBuilder {
     data: any = {};
-    setTitle(t: string) { this.data.title = t; return this; }
-    setDescription(d: string) { this.data.description = d; return this; }
-    setColor(c: number) { this.data.color = c; return this; }
-    setURL(u: string) { this.data.url = u; return this; }
-    setThumbnail(t: string) { this.data.thumbnail = t; return this; }
-    setImage(i: string) { this.data.image = i; return this; }
-    setFooter(f: any) { this.data.footer = f; return this; }
-    addFields(...f: any[]) { this.data.fields = [...(this.data.fields || []), ...f]; return this; }
+    setTitle(t: string) {
+      this.data.title = t;
+      return this;
+    }
+    setDescription(d: string) {
+      this.data.description = d;
+      return this;
+    }
+    setColor(c: number) {
+      this.data.color = c;
+      return this;
+    }
+    setURL(u: string) {
+      this.data.url = u;
+      return this;
+    }
+    setThumbnail(t: string) {
+      this.data.thumbnail = t;
+      return this;
+    }
+    setImage(i: string) {
+      this.data.image = i;
+      return this;
+    }
+    setFooter(f: any) {
+      this.data.footer = f;
+      return this;
+    }
+    addFields(...f: any[]) {
+      this.data.fields = [...(this.data.fields || []), ...f];
+      return this;
+    }
   }
 
   return {
@@ -182,9 +206,7 @@ function createMessage(overrides: {
     member: overrides.memberDisplayName
       ? { displayName: overrides.memberDisplayName }
       : null,
-    guild: overrides.guildName
-      ? { name: overrides.guildName }
-      : null,
+    guild: overrides.guildName ? { name: overrides.guildName } : null,
     channel: {
       name: overrides.channelName ?? 'general',
       isThread: () => false,
@@ -663,8 +685,11 @@ describe('DiscordChannel', () => {
 
       await channel.sendMessage('dc:1234567890123456', 'Hello');
 
-      const fetchedChannel = await currentClient().channels.fetch('1234567890123456');
-      expect(currentClient().channels.fetch).toHaveBeenCalledWith('1234567890123456');
+      const fetchedChannel =
+        await currentClient().channels.fetch('1234567890123456');
+      expect(currentClient().channels.fetch).toHaveBeenCalledWith(
+        '1234567890123456',
+      );
     });
 
     it('strips dc: prefix from JID', async () => {

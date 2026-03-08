@@ -110,7 +110,11 @@ export interface Channel {
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
   // Optional: send a file attachment.
-  sendAttachment?(jid: string, filePath: string, caption?: string): Promise<void>;
+  sendAttachment?(
+    jid: string,
+    filePath: string,
+    caption?: string,
+  ): Promise<void>;
   // Optional: send a rich embed.
   sendEmbed?(jid: string, embed: EmbedData): Promise<void>;
   // Optional: add an emoji reaction to a message.
