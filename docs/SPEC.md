@@ -403,6 +403,16 @@ ANTHROPIC_API_KEY=sk-ant-api03-...
 
 Only the authentication variables (`CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY`) are extracted from `.env` and written to `data/env/env`, then mounted into the container at `/workspace/env-dir/env` and sourced by the entrypoint script. This ensures other environment variables in `.env` are not exposed to the agent. This workaround is needed because some container runtimes lose `-e` environment variables when using `-i` (interactive mode with piped stdin).
 
+### Mini-Daemon Builder Bot
+
+The self-build pipeline has its own Discord bot identity so progress messages appear as "Mini-Daemon" rather than the main Daemon bot. Configure in `.env`:
+
+```bash
+DISCORD_BUILDER_BOT_TOKEN=your-mini-daemon-bot-token
+```
+
+When set, all self-build progress messages, embeds (success/failure), and heartbeat updates are sent through the Mini-Daemon bot client (`src/builder-bot.ts`). The client connects on-demand when a build starts and disconnects after cleanup. If no builder token is configured, messages fall back to the main Daemon bot.
+
 ### Changing the Assistant Name
 
 Set the `ASSISTANT_NAME` environment variable:

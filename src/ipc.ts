@@ -10,6 +10,12 @@ import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
+import {
+  builderSendEmbed,
+  builderSendMessage,
+  connectBuilderBot,
+  disconnectBuilderBot,
+} from './builder-bot.js';
 import { EmbedData, RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
@@ -715,20 +721,6 @@ export async function processTaskIpc(
         }
       };
 
-      const sendAs = async (msg: string) => {
-        appendLog(msg);
-        if (buildChatJid) {
-          try {
-            await deps.sendMessage(buildChatJid, `🔧 **Mini-Daemon**: ${msg}`);
-          } catch (err) {
-            logger.warn(
-              { err, chatJid: buildChatJid },
-              'Mini-Daemon: failed to send message to Discord',
-            );
-          }
-        }
-      };
-
       const writeStatus = (status: string, detail?: string) => {
         try {
           fs.writeFileSync(
@@ -767,8 +759,34 @@ export async function processTaskIpc(
         let stderrFlushTimer: ReturnType<typeof setTimeout> | null = null;
         let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 
+        // Connect the Mini-Daemon builder bot so messages appear under its own identity.
+        // Falls back to the main Daemon bot if the token isn't configured.
+        const useBuilderBot =
+          buildChatJid?.startsWith('dc:') &&
+          (await connectBuilderBot());
+
+        const sendAs = async (msg: string) => {
+          appendLog(msg);
+          if (buildChatJid) {
+            try {
+              const formatted = `🔧 **Mini-Daemon**: ${msg}`;
+              if (useBuilderBot) {
+                await builderSendMessage(buildChatJid, formatted);
+              } else {
+                await deps.sendMessage(buildChatJid, formatted);
+              }
+            } catch (err) {
+              logger.warn(
+                { err, chatJid: buildChatJid },
+                'Mini-Daemon: failed to send message to Discord',
+              );
+            }
+          }
+        };
+
         // Cleanup helper — removes worktree + branch, never touches cwd/main
         const cleanup = () => {
+          if (useBuilderBot) disconnectBuilderBot();
           try {
             if (worktreeDir && fs.existsSync(worktreeDir)) {
               execSync(`git worktree remove --force ${worktreeDir}`, { cwd });
@@ -1072,20 +1090,23 @@ export async function processTaskIpc(
               validateErr instanceof Error
                 ? validateErr.message.slice(-500)
                 : String(validateErr);
-            if (buildChatJid && deps.sendEmbed) {
-              await deps.sendEmbed(buildChatJid, {
-                title: '🔧 Mini-Daemon — Build Failed',
-                description:
-                  'Build/test validation failed in worktree. No changes made to main.',
-                color: 16711680,
-                fields: [
-                  {
-                    name: 'Error',
-                    value: '```\n' + errMsg.slice(0, 900) + '\n```',
-                    inline: false,
-                  },
-                ],
-              });
+            const failEmbed: EmbedData = {
+              title: '🔧 Mini-Daemon — Build Failed',
+              description:
+                'Build/test validation failed in worktree. No changes made to main.',
+              color: 16711680,
+              fields: [
+                {
+                  name: 'Error',
+                  value: '```\n' + errMsg.slice(0, 900) + '\n```',
+                  inline: false,
+                },
+              ],
+            };
+            if (buildChatJid && useBuilderBot) {
+              await builderSendEmbed(buildChatJid, failEmbed);
+            } else if (buildChatJid && deps.sendEmbed) {
+              await deps.sendEmbed(buildChatJid, failEmbed);
             } else {
               await sendAs(
                 `Build/test failed in worktree — main is untouched.\n\`\`\`\n${errMsg}\n\`\`\``,
@@ -1124,20 +1145,23 @@ export async function processTaskIpc(
           // Clean up the worktree before restarting
           cleanup();
 
-          if (buildChatJid && deps.sendEmbed) {
-            await deps.sendEmbed(buildChatJid, {
-              title: '🔧 Mini-Daemon — Build Complete',
-              description: `Changes merged from worktree branch \`${branchName}\`. Build and tests passed.`,
-              color: 65280,
-              fields: [
-                {
-                  name: 'Prompt',
-                  value: buildPrompt.slice(0, 200),
-                  inline: false,
-                },
-              ],
-              footer: 'Restarting now...',
-            });
+          const successEmbed: EmbedData = {
+            title: '🔧 Mini-Daemon — Build Complete',
+            description: `Changes merged from worktree branch \`${branchName}\`. Build and tests passed.`,
+            color: 65280,
+            fields: [
+              {
+                name: 'Prompt',
+                value: buildPrompt.slice(0, 200),
+                inline: false,
+              },
+            ],
+            footer: 'Restarting now...',
+          };
+          if (buildChatJid && useBuilderBot) {
+            await builderSendEmbed(buildChatJid, successEmbed);
+          } else if (buildChatJid && deps.sendEmbed) {
+            await deps.sendEmbed(buildChatJid, successEmbed);
           } else {
             await sendAs(
               `All done! Changes merged from \`${branchName}\`, build + tests passed. Restarting now...`,
@@ -1152,20 +1176,23 @@ export async function processTaskIpc(
           const errMsg =
             err instanceof Error ? err.message.slice(-500) : String(err);
           cleanup();
-          if (buildChatJid && deps.sendEmbed) {
-            await deps.sendEmbed(buildChatJid, {
-              title: '🔧 Mini-Daemon — Error',
-              description:
-                'Something went wrong. Worktree cleaned up, main is untouched.',
-              color: 16711680,
-              fields: [
-                {
-                  name: 'Error',
-                  value: '```\n' + errMsg.slice(0, 900) + '\n```',
-                  inline: false,
-                },
-              ],
-            });
+          const errEmbed: EmbedData = {
+            title: '🔧 Mini-Daemon — Error',
+            description:
+              'Something went wrong. Worktree cleaned up, main is untouched.',
+            color: 16711680,
+            fields: [
+              {
+                name: 'Error',
+                value: '```\n' + errMsg.slice(0, 900) + '\n```',
+                inline: false,
+              },
+            ],
+          };
+          if (buildChatJid && useBuilderBot) {
+            await builderSendEmbed(buildChatJid, errEmbed);
+          } else if (buildChatJid && deps.sendEmbed) {
+            await deps.sendEmbed(buildChatJid, errEmbed);
           } else {
             await sendAs(
               `Something went wrong — worktree cleaned up, main untouched.\n\`\`\`\n${errMsg}\n\`\`\``,

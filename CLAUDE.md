@@ -18,6 +18,7 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `src/container-runner.ts` | Spawns agent containers with mounts |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
+| `src/builder-bot.ts` | Mini-Daemon's own Discord bot client for self-build messages |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
 | `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
 
@@ -65,7 +66,7 @@ The Discord channel supports rich messaging beyond plain text:
 - **Thread Support:** Messages from threads route to the parent channel's group; replies go back to the thread automatically
 - **Reactions:** `Channel.addReaction(jid, messageId, emoji)` — agents add emoji reactions via IPC `type: "reaction"`
 - **Self-Update:** IPC `type: "run_host_command"` (main-only) supports `update`, `restart`, `status` commands
-- **Self-Build:** IPC `type: "run_claude_session"` (main-only) spawns a Claude Code sidecar ("Builder") on the host to modify NanoClaw's own codebase with git safety, build validation, auto-rollback, status tracking, build result embeds (green/red), heartbeat monitoring, and spawn validation
+- **Self-Build:** IPC `type: "run_claude_session"` (main-only) spawns a Claude Code sidecar ("Builder") on the host to modify NanoClaw's own codebase with git safety, build validation, auto-rollback, status tracking, build result embeds (green/red), heartbeat monitoring, and spawn validation. **Mini-Daemon has its own Discord bot identity** (`DISCORD_BUILDER_BOT_TOKEN` in `.env`) — self-build progress messages and embeds appear under the Mini-Daemon bot, not the main Daemon bot. Falls back to the main bot if the builder token isn't configured.
 
 Discord bot requires these permissions: Send Messages, Read Message History, View Channels, Attach Files, Embed Links, Send Messages in Threads, Add Reactions.
 
