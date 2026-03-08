@@ -119,6 +119,12 @@ export interface Channel {
   sendEmbed?(jid: string, embed: EmbedData): Promise<void>;
   // Optional: add an emoji reaction to a message.
   addReaction?(jid: string, messageId: string, emoji: string): Promise<void>;
+  // Optional: Discord admin operations
+  deleteMessage?(channelId: string, messageId: string): Promise<void>;
+  deleteMessages?(channelId: string, count: number): Promise<number>;
+  createChannel?(name: string, type: 'text' | 'voice' | 'category', topic?: string): Promise<{ id: string; name: string }>;
+  editChannel?(channelId: string, options: { name?: string; topic?: string }): Promise<void>;
+  getMembers?(): Promise<{ id: string; username: string; displayName: string; bot: boolean }[]>;
 }
 
 // Callback type that channels use to deliver inbound messages

@@ -68,9 +68,16 @@ The Discord channel supports rich messaging beyond plain text:
 - **Self-Update:** IPC `type: "run_host_command"` (main-only) supports `update`, `restart`, `status` commands
 - **Self-Build:** IPC `type: "run_claude_session"` (main-only) spawns a Claude Code sidecar ("Builder") on the host to modify NanoClaw's own codebase with git safety, build validation, auto-rollback, status tracking, build result embeds (green/red), heartbeat monitoring, and spawn validation. **Mini-Daemon has its own Discord bot identity** (`DISCORD_BUILDER_BOT_TOKEN` in `.env`) — self-build progress messages and embeds appear under the Mini-Daemon bot (no text prefix needed — the bot identity identifies the sender), not the main Daemon bot. Falls back to the main bot if the builder token isn't configured. **Smart reload:** After merge, the pipeline analyzes changed files — if only workspace files (groups/), container agent source, docs, or config files changed, it skips the full service restart. Only changes to compiled host source (`src/`), dependencies (`package.json`), or container image files trigger a restart.
 
-Discord bot requires these permissions: Send Messages, Read Message History, View Channels, Attach Files, Embed Links, Send Messages in Threads, Add Reactions.
+- **Discord Admin API (main-only):** Admin tools via IPC for server management:
+  - `discord_delete_message(channel_id, message_id)` — delete a specific message
+  - `discord_delete_messages(channel_id, count)` — bulk delete last N messages (up to 100, <14 days old)
+  - `discord_create_channel(name, type, topic?)` — create text/voice/category channel
+  - `discord_edit_channel(channel_id, name?, topic?)` — edit channel properties
+  - `discord_get_members()` — list server members with IDs, names, bot status
 
-**Typing Indicator:** Discord `setTyping()` refreshes every 7 seconds via interval, keeping "typing..." visible until the response is sent. Intervals are tracked per-JID and cleaned up on `setTyping(false)` or `disconnect()`. Additionally, `sendMessage()` auto-clears the typing indicator after each message is confirmed sent, ensuring typing never persists after a response.
+Discord bot requires these permissions: Send Messages, Read Message History, View Channels, Attach Files, Embed Links, Send Messages in Threads, Add Reactions, Manage Messages, Manage Channels, Server Members Intent.
+
+**Typing Indicator:** Discord `setTyping()` refreshes every 7 seconds via interval, keeping "typing..." visible until the response is sent. Intervals are tracked per-JID and cleaned up via `clearTypingInterval()` (synchronous to prevent race conditions). `sendMessage()` clears the interval BEFORE sending the message to prevent the refresh from firing between send and cleanup. Also cleared by `setTyping(false)` and `disconnect()`.
 
 **Startup Message:** After all channels connect, Daemon sends "🖤 Back online!" to the main Discord channel so users know the service is live.
 

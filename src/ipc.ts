@@ -32,6 +32,11 @@ export interface IpcDeps {
     messageId: string,
     emoji: string,
   ) => Promise<void>;
+  deleteMessage?: (channelId: string, messageId: string) => Promise<void>;
+  deleteMessages?: (channelId: string, count: number) => Promise<number>;
+  createChannel?: (name: string, type: 'text' | 'voice' | 'category', topic?: string) => Promise<{ id: string; name: string }>;
+  editChannel?: (channelId: string, options: { name?: string; topic?: string }) => Promise<void>;
+  getMembers?: () => Promise<{ id: string; username: string; displayName: string; bot: boolean }[]>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -259,11 +264,39 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'IPC reaction added',
                   );
                 }
-              } else if (data.chatJid && !authorized) {
-                logger.warn(
-                  { chatJid: data.chatJid, sourceGroup, type: data.type },
-                  'Unauthorized IPC message attempt blocked',
-                );
+              }
+              // Discord admin operations (main group only)
+              if (isMain) {
+                if (data.type === 'discord_delete_message' && data.channelId && data.messageId && deps.deleteMessage) {
+                  await deps.deleteMessage(data.channelId, data.messageId);
+                  logger.info({ channelId: data.channelId, messageId: data.messageId, sourceGroup }, 'IPC discord message deleted');
+                } else if (data.type === 'discord_delete_messages' && data.channelId && data.count && deps.deleteMessages) {
+                  const deleted = await deps.deleteMessages(data.channelId, data.count);
+                  logger.info({ channelId: data.channelId, requested: data.count, deleted, sourceGroup }, 'IPC discord bulk delete');
+                  // Write result back for the agent to read
+                  const resultFile = path.join(ipcBaseDir, sourceGroup, 'admin_result.json');
+                  fs.writeFileSync(resultFile, JSON.stringify({ type: 'discord_delete_messages_result', deleted }));
+                } else if (data.type === 'discord_create_channel' && data.channelName && deps.createChannel) {
+                  const result = await deps.createChannel(data.channelName, data.channelType || 'text', data.topic);
+                  logger.info({ ...result, sourceGroup }, 'IPC discord channel created');
+                  const resultFile = path.join(ipcBaseDir, sourceGroup, 'admin_result.json');
+                  fs.writeFileSync(resultFile, JSON.stringify({ type: 'discord_create_channel_result', ...result }));
+                } else if (data.type === 'discord_edit_channel' && data.channelId && deps.editChannel) {
+                  await deps.editChannel(data.channelId, { name: data.channelName, topic: data.topic });
+                  logger.info({ channelId: data.channelId, sourceGroup }, 'IPC discord channel edited');
+                } else if (data.type === 'discord_get_members' && deps.getMembers) {
+                  const members = await deps.getMembers();
+                  logger.info({ count: members.length, sourceGroup }, 'IPC discord members fetched');
+                  const resultFile = path.join(ipcBaseDir, sourceGroup, 'admin_result.json');
+                  fs.writeFileSync(resultFile, JSON.stringify({ type: 'discord_get_members_result', members }));
+                }
+              } else if (!data.chatJid || !authorized) {
+                if (data.chatJid && !authorized) {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup, type: data.type },
+                    'Unauthorized IPC message attempt blocked',
+                  );
+                }
               }
               fs.unlinkSync(filePath);
             } catch (err) {

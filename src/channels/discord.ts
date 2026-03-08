@@ -3,6 +3,7 @@ import path from 'path';
 
 import {
   AttachmentBuilder,
+  ChannelType,
   Client,
   EmbedBuilder,
   Events,
@@ -54,6 +55,7 @@ export class DiscordChannel implements Channel {
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.GuildMembers,
       ],
     });
 
@@ -249,6 +251,12 @@ export class DiscordChannel implements Channel {
     const channel = await this.resolveChannel(jid);
     if (!channel) return;
 
+    // Clear typing indicator BEFORE sending the message.
+    // This prevents a race condition where the 7s refresh interval fires
+    // a sendTyping() call between message delivery and interval cleanup,
+    // causing "typing..." to persist for another ~10s after the response.
+    this.clearTypingInterval(jid);
+
     // Discord has a 2000 character limit per message — split if needed
     const MAX_LENGTH = 2000;
     if (text.length <= MAX_LENGTH) {
@@ -259,10 +267,6 @@ export class DiscordChannel implements Channel {
       }
     }
     logger.info({ jid, length: text.length }, 'Discord message sent');
-
-    // Clear typing indicator after message is confirmed sent.
-    // This ensures the "typing..." indicator doesn't persist after the response.
-    await this.setTyping(jid, false);
   }
 
   async sendAttachment(
@@ -324,10 +328,9 @@ export class DiscordChannel implements Channel {
 
   async disconnect(): Promise<void> {
     // Clear all typing refresh intervals
-    for (const interval of this.typingIntervals.values()) {
-      clearInterval(interval);
+    for (const jid of this.typingIntervals.keys()) {
+      this.clearTypingInterval(jid);
     }
-    this.typingIntervals.clear();
 
     if (this.client) {
       this.client.destroy();
@@ -336,13 +339,21 @@ export class DiscordChannel implements Channel {
     }
   }
 
-  async setTyping(jid: string, isTyping: boolean): Promise<void> {
-    // Always clear existing refresh interval first
+  /**
+   * Clear the typing refresh interval for a JID without any async operations.
+   * Synchronous to avoid race conditions between interval firing and cleanup.
+   */
+  private clearTypingInterval(jid: string): void {
     const existing = this.typingIntervals.get(jid);
     if (existing) {
       clearInterval(existing);
       this.typingIntervals.delete(jid);
     }
+  }
+
+  async setTyping(jid: string, isTyping: boolean): Promise<void> {
+    // Always clear existing refresh interval first
+    this.clearTypingInterval(jid);
 
     if (!this.client || !isTyping) return;
     try {
@@ -364,6 +375,84 @@ export class DiscordChannel implements Channel {
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Discord typing indicator');
     }
+  }
+
+  // --- Discord Admin API methods ---
+
+  async deleteMessage(channelId: string, messageId: string): Promise<void> {
+    if (!this.client) throw new Error('Discord client not initialized');
+    const channel = await this.client.channels.fetch(channelId);
+    if (!channel || !('messages' in channel)) {
+      throw new Error(`Channel ${channelId} not found or not text-based`);
+    }
+    const textChannel = channel as TextChannel;
+    const message = await textChannel.messages.fetch(messageId);
+    await message.delete();
+    logger.info({ channelId, messageId }, 'Discord message deleted');
+  }
+
+  async deleteMessages(channelId: string, count: number): Promise<number> {
+    if (!this.client) throw new Error('Discord client not initialized');
+    const channel = await this.client.channels.fetch(channelId);
+    if (!channel || !('bulkDelete' in channel)) {
+      throw new Error(`Channel ${channelId} not found or doesn't support bulk delete`);
+    }
+    const textChannel = channel as TextChannel;
+    const clamped = Math.min(Math.max(1, count), 100);
+    const deleted = await textChannel.bulkDelete(clamped, true);
+    logger.info({ channelId, requested: clamped, deleted: deleted.size }, 'Discord bulk delete');
+    return deleted.size;
+  }
+
+  async createChannel(
+    name: string,
+    type: 'text' | 'voice' | 'category',
+    topic?: string,
+  ): Promise<{ id: string; name: string }> {
+    if (!this.client) throw new Error('Discord client not initialized');
+    // Use the first guild the bot is in
+    const guild = this.client.guilds.cache.first();
+    if (!guild) throw new Error('Bot is not in any guild');
+
+    const typeMap = {
+      text: ChannelType.GuildText,
+      voice: ChannelType.GuildVoice,
+      category: ChannelType.GuildCategory,
+    } as const;
+    const channelType = typeMap[type] ?? ChannelType.GuildText;
+    const created = await guild.channels.create({
+      name,
+      type: channelType,
+      topic: channelType === ChannelType.GuildText ? topic : undefined,
+    });
+    logger.info({ id: created.id, name: created.name, type }, 'Discord channel created');
+    return { id: created.id, name: created.name };
+  }
+
+  async editChannel(
+    channelId: string,
+    options: { name?: string; topic?: string },
+  ): Promise<void> {
+    if (!this.client) throw new Error('Discord client not initialized');
+    const channel = await this.client.channels.fetch(channelId);
+    if (!channel || !('edit' in channel)) {
+      throw new Error(`Channel ${channelId} not found or not editable`);
+    }
+    await (channel as TextChannel).edit(options);
+    logger.info({ channelId, options }, 'Discord channel edited');
+  }
+
+  async getMembers(): Promise<{ id: string; username: string; displayName: string; bot: boolean }[]> {
+    if (!this.client) throw new Error('Discord client not initialized');
+    const guild = this.client.guilds.cache.first();
+    if (!guild) throw new Error('Bot is not in any guild');
+    const members = await guild.members.fetch();
+    return members.map((m) => ({
+      id: m.id,
+      username: m.user.username,
+      displayName: m.displayName,
+      bot: m.user.bot,
+    }));
   }
 
   /**
