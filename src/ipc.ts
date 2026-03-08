@@ -686,7 +686,7 @@ export async function processTaskIpc(
         if (data.chatJid) {
           await deps.sendMessage(
             data.chatJid,
-            '🔧 **Mini-Daemon**: Already working on something! Talk to me or wait for me to finish.',
+            'Already working on something! Talk to me or wait for me to finish.',
           );
         }
         break;
@@ -777,7 +777,7 @@ export async function processTaskIpc(
           appendLog(msg);
           if (buildChatJid) {
             try {
-              const formatted = `🔧 **Mini-Daemon**: ${msg}`;
+              const formatted = msg;
               if (useBuilderBot) {
                 await builderSendMessage(buildChatJid, formatted);
               } else {
@@ -1105,7 +1105,7 @@ export async function processTaskIpc(
                 ? validateErr.message.slice(-500)
                 : String(validateErr);
             const failEmbed: EmbedData = {
-              title: '🔧 Mini-Daemon — Build Failed',
+              title: '🔧 Build Failed',
               description:
                 'Build/test validation failed in worktree. No changes made to main.',
               color: 16711680,
@@ -1221,7 +1221,7 @@ export async function processTaskIpc(
             ? 'Restarting now...'
             : 'No restart needed — changes are hot-reloadable.';
           const successEmbed: EmbedData = {
-            title: '🔧 Mini-Daemon — Build Complete',
+            title: '🔧 Build Complete',
             description: `Changes merged from worktree branch \`${branchName}\`. Build and tests passed.`,
             color: 65280,
             fields: [
@@ -1279,7 +1279,7 @@ export async function processTaskIpc(
             err instanceof Error ? err.message.slice(-500) : String(err);
           // Send error embed BEFORE disconnecting the builder bot
           const errEmbed: EmbedData = {
-            title: '🔧 Mini-Daemon — Error',
+            title: '🔧 Error',
             description:
               'Something went wrong. Worktree cleaned up, main is untouched.',
             color: 16711680,
@@ -1320,7 +1320,7 @@ export async function processTaskIpc(
         if (!sent && data.chatJid) {
           await deps.sendMessage(
             data.chatJid,
-            '🔧 No active Mini-Daemon session to forward to.',
+            'No active Mini-Daemon session to forward to.',
           );
         }
       }
@@ -1333,7 +1333,7 @@ export async function processTaskIpc(
         if (data.chatJid) {
           await deps.sendMessage(
             data.chatJid,
-            '🔧 No active Mini-Daemon session to cancel.',
+            'No active Mini-Daemon session to cancel.',
           );
         }
         break;
@@ -1342,7 +1342,7 @@ export async function processTaskIpc(
       if (data.chatJid) {
         await deps.sendMessage(
           data.chatJid,
-          '🔧 Cancelling Mini-Daemon build...',
+          'Cancelling Mini-Daemon build...',
         );
       }
       builderProcess.kill('SIGTERM');
