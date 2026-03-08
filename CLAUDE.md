@@ -55,6 +55,14 @@ systemctl --user stop nanoclaw
 systemctl --user restart nanoclaw
 ```
 
+## Discord Enhanced Capabilities
+
+The Discord channel supports rich messaging beyond plain text:
+
+- **Reactions:** `Channel.addReaction(jid, messageId, emoji)` — agents add emoji reactions via IPC `type: "reaction"`
+
+Discord bot requires these permissions: Send Messages, Read Message History, View Channels, Add Reactions.
+
 ## Troubleshooting
 
 **WhatsApp not connecting after upgrade:** WhatsApp is now a separate skill, not bundled in core. Run `/add-whatsapp` (or `npx tsx scripts/apply-skill.ts .claude/skills/add-whatsapp && npm run build`) to install it. Existing auth credentials and groups are preserved.

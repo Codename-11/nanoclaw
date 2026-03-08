@@ -43,6 +43,10 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
+## Discord Rich Messaging
+
+- **Reactions:** `mcp__nanoclaw__add_reaction` — add emoji reactions to messages. Use standard emoji or custom Discord emoji format. Requires the Discord message ID.
+
 ## WhatsApp Formatting (and other messaging apps)
 
 Do NOT use markdown headings (##) in WhatsApp messages. Only use:

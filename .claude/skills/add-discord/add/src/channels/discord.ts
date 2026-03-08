@@ -36,6 +36,7 @@ export class DiscordChannel implements Channel {
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.GuildMessageReactions,
       ],
     });
 
@@ -234,6 +235,30 @@ export class DiscordChannel implements Channel {
       }
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Discord typing indicator');
+    }
+  }
+
+  async addReaction(jid: string, messageId: string, emoji: string): Promise<void> {
+    if (!this.client) {
+      logger.warn('Discord client not initialized');
+      return;
+    }
+
+    try {
+      const channelId = jid.replace(/^dc:/, '');
+      const channel = await this.client.channels.fetch(channelId);
+
+      if (!channel || !('messages' in channel)) {
+        logger.warn({ jid }, 'Discord channel not found or not text-based');
+        return;
+      }
+
+      const textChannel = channel as TextChannel;
+      const message = await textChannel.messages.fetch(messageId);
+      await message.react(emoji);
+      logger.info({ jid, messageId, emoji }, 'Discord reaction added');
+    } catch (err) {
+      logger.error({ jid, messageId, emoji, err }, 'Failed to add Discord reaction');
     }
   }
 }

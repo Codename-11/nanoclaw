@@ -12,6 +12,7 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  addReaction?: (jid: string, messageId: string, emoji: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -73,24 +74,36 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(messagesDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (data.type === 'message' && data.chatJid && data.text) {
-                // Authorization: verify this group can send to this chatJid
-                const targetGroup = registeredGroups[data.chatJid];
-                if (
-                  isMain ||
-                  (targetGroup && targetGroup.folder === sourceGroup)
-                ) {
+              // Authorization: verify this group can send to this chatJid
+              const targetGroup = registeredGroups[data.chatJid];
+              const authorized =
+                isMain ||
+                (targetGroup && targetGroup.folder === sourceGroup);
+
+              if (data.chatJid && authorized) {
+                if (data.type === 'message' && data.text) {
                   await deps.sendMessage(data.chatJid, data.text);
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
                   );
-                } else {
-                  logger.warn(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'Unauthorized IPC message attempt blocked',
+                } else if (
+                  data.type === 'reaction' &&
+                  data.messageId &&
+                  data.emoji &&
+                  deps.addReaction
+                ) {
+                  await deps.addReaction(data.chatJid, data.messageId, data.emoji);
+                  logger.info(
+                    { chatJid: data.chatJid, sourceGroup, messageId: data.messageId },
+                    'IPC reaction added',
                   );
                 }
+              } else if (data.chatJid && !authorized) {
+                logger.warn(
+                  { chatJid: data.chatJid, sourceGroup, type: data.type },
+                  'Unauthorized IPC message attempt blocked',
+                );
               }
               fs.unlinkSync(filePath);
             } catch (err) {
