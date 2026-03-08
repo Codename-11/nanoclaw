@@ -162,7 +162,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     ASSISTANT_NAME,
   );
 
-  if (missedMessages.length === 0) return true;
+  if (missedMessages.length === 0 && !queue.isPersistent(chatJid)) return true;
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
@@ -175,17 +175,24 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages, TIMEZONE);
+  // For persistent containers with no messages yet, use an init prompt.
+  // The container will stay alive and receive real messages via IPC.
+  const prompt =
+    missedMessages.length > 0
+      ? formatMessages(missedMessages, TIMEZONE)
+      : '[System: persistent container started. Waiting for messages via IPC.]';
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] =
-    missedMessages[missedMessages.length - 1].timestamp;
-  saveState();
+  if (missedMessages.length > 0) {
+    lastAgentTimestamp[chatJid] =
+      missedMessages[missedMessages.length - 1].timestamp;
+    saveState();
+  }
 
   logger.info(
-    { group: group.name, messageCount: missedMessages.length },
+    { group: group.name, messageCount: missedMessages.length, persistent: queue.isPersistent(chatJid) },
     'Processing messages',
   );
 
@@ -206,7 +213,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
-  await channel.setTyping?.(chatJid, true);
+  if (missedMessages.length > 0) {
+    await channel.setTyping?.(chatJid, true);
+  }
   let hadError = false;
   let outputSentToUser = false;
 
