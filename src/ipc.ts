@@ -1109,10 +1109,15 @@ export async function processTaskIpc(
               execSync('git diff --cached --quiet', { cwd, stdio: 'pipe' });
             } catch {
               // There are staged changes — commit them
-              execSync('git commit -m "wip: auto-save before self-build merge"', { cwd, stdio: 'pipe' });
+              execSync(
+                'git commit -m "wip: auto-save before self-build merge"',
+                { cwd, stdio: 'pipe' },
+              );
               didAutoCommit = true;
             }
-          } catch { /* nothing to commit */ }
+          } catch {
+            /* nothing to commit */
+          }
 
           execSync(`git merge ${branchName} --no-edit`, { cwd });
 
