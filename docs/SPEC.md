@@ -177,7 +177,7 @@ interface Channel {
 
 The `EmbedData` type supports `title`, `description`, `color`, `fields` (name/value/inline), `thumbnail`, `image`, `footer`, and `url`.
 
-**Typing indicator lifecycle:** Discord's `setTyping(jid, true)` starts a 7-second refresh interval. Cleanup uses the synchronous `clearTypingInterval()` method to prevent race conditions. It is cleared in three places: (1) `processGroupMessages` finally block after agent completes, (2) `sendMessage()` clears the interval BEFORE sending to prevent the refresh from firing between send and cleanup, and (3) `disconnect()` clears all intervals on shutdown.
+**Typing indicator lifecycle:** Discord's `setTyping(jid, true)` starts a 7-second refresh interval. Cleanup uses the synchronous `clearTypingInterval()` method and a `typingCancelled` Set to prevent race conditions — the interval callback checks this flag before each `sendTyping()` call, preventing in-flight callbacks from restarting the indicator after a message is sent. It is cleared in three places: (1) `processGroupMessages` finally block after agent completes, (2) `sendMessage()` clears the interval BEFORE sending to prevent the refresh from firing between send and cleanup, and (3) `disconnect()` clears all intervals on shutdown.
 
 ### Self-Registration Pattern
 
@@ -429,6 +429,16 @@ Before merging the worktree branch into main, the pipeline auto-commits any unco
 #### Relay Prompt
 
 Mini-Daemon's prompt is prepended with instructions explaining that its stdout is parsed by the host process and relayed to Discord automatically. This prevents Mini-Daemon from wasting time searching for MCP messaging tools (which don't exist in the sidecar session). The relay prompt is injected in `src/ipc.ts` before the `claude -p` invocation.
+
+#### Merge Failure Protection
+
+If the build passes validation but the merge into main fails (e.g., merge conflicts), the pipeline:
+1. Aborts the failed merge (`git merge --abort`) to leave main in a clean state
+2. Preserves the worktree directory and branch (does NOT clean up)
+3. Sends a yellow embed with branch name, worktree path, error details, and recovery instructions
+4. Writes status as `merge_failed`
+
+The user can reply "cleanup" to discard the worktree, or merge manually using the preserved branch.
 
 #### Smart Reload
 

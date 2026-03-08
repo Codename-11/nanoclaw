@@ -565,18 +565,24 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Send startup acknowledgement to main group
+  // Send startup acknowledgement to main group.
+  // Small delay lets Discord's channel cache populate after ClientReady.
   {
     let mainFound = false;
     for (const [jid, group] of Object.entries(registeredGroups)) {
       if (group.isMain) {
         mainFound = true;
+        // Give Discord a moment to populate channel cache after ready event
+        await new Promise((r) => setTimeout(r, 2000));
         const ch = findChannel(channels, jid);
         if (ch) {
-          logger.info({ jid }, 'Sending startup message to main group');
-          ch.sendMessage(jid, '🖤 Back online!').catch((err) =>
-            logger.warn({ jid, err }, 'Failed to send startup message'),
-          );
+          logger.info({ jid, channel: ch.name }, 'Sending startup message to main group');
+          try {
+            await ch.sendMessage(jid, '🖤 Back online!');
+            logger.info({ jid }, 'Startup message sent successfully');
+          } catch (err) {
+            logger.warn({ jid, err }, 'Failed to send startup message');
+          }
         } else {
           logger.warn(
             {
@@ -592,7 +598,14 @@ async function main(): Promise<void> {
     }
     if (!mainFound) {
       logger.warn(
-        { groupCount: Object.keys(registeredGroups).length },
+        {
+          groupCount: Object.keys(registeredGroups).length,
+          groups: Object.entries(registeredGroups).map(([jid, g]) => ({
+            jid,
+            name: g.name,
+            isMain: g.isMain,
+          })),
+        },
         'No main group found in registered groups — startup message skipped',
       );
     }

@@ -42,6 +42,9 @@ export class DiscordChannel implements Channel {
   private activeThreads = new Map<string, string>();
   // Typing refresh intervals per JID (Discord typing expires after ~10s)
   private typingIntervals = new Map<string, ReturnType<typeof setInterval>>();
+  // Guard flag: JIDs where typing has been cancelled — prevents in-flight
+  // sendTyping() calls from restarting the indicator after a message is sent.
+  private typingCancelled = new Set<string>();
 
   constructor(botToken: string, opts: DiscordChannelOpts) {
     this.botToken = botToken;
@@ -251,10 +254,10 @@ export class DiscordChannel implements Channel {
     const channel = await this.resolveChannel(jid);
     if (!channel) return;
 
-    // Clear typing indicator BEFORE sending the message.
-    // This prevents a race condition where the 7s refresh interval fires
-    // a sendTyping() call between message delivery and interval cleanup,
-    // causing "typing..." to persist for another ~10s after the response.
+    // Clear typing interval BEFORE sending. This prevents the interval from
+    // firing during the await on channel.send(). The typingCancelled guard
+    // (set by clearTypingInterval) also prevents any already-in-flight
+    // sendTyping() call from restarting the indicator.
     this.clearTypingInterval(jid);
 
     // Discord has a 2000 character limit per message — split if needed
@@ -328,9 +331,10 @@ export class DiscordChannel implements Channel {
 
   async disconnect(): Promise<void> {
     // Clear all typing refresh intervals
-    for (const jid of this.typingIntervals.keys()) {
+    for (const jid of [...this.typingIntervals.keys()]) {
       this.clearTypingInterval(jid);
     }
+    this.typingCancelled.clear();
 
     if (this.client) {
       this.client.destroy();
@@ -342,6 +346,9 @@ export class DiscordChannel implements Channel {
   /**
    * Clear the typing refresh interval for a JID without any async operations.
    * Synchronous to avoid race conditions between interval firing and cleanup.
+   * Also sets a cancellation flag so any in-flight sendTyping() calls
+   * (already past the interval callback's guard check) won't restart the
+   * typing indicator after the message is sent.
    */
   private clearTypingInterval(jid: string): void {
     const existing = this.typingIntervals.get(jid);
@@ -349,6 +356,8 @@ export class DiscordChannel implements Channel {
       clearInterval(existing);
       this.typingIntervals.delete(jid);
     }
+    // Signal to any in-flight interval callbacks to not call sendTyping
+    this.typingCancelled.add(jid);
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
@@ -356,12 +365,22 @@ export class DiscordChannel implements Channel {
     this.clearTypingInterval(jid);
 
     if (!this.client || !isTyping) return;
+
+    // Remove cancellation flag — we're actively starting to type
+    this.typingCancelled.delete(jid);
+
     try {
       const channel = await this.resolveChannel(jid);
       if (channel && 'sendTyping' in channel) {
         await (channel as TextChannel).sendTyping();
         // Refresh every 7s to keep "typing..." visible until response arrives
         const interval = setInterval(async () => {
+          // Guard: if typing was cancelled (clearTypingInterval was called),
+          // skip this sendTyping() call even if the interval hasn't been
+          // cleared yet (e.g., callback was already queued on the event loop).
+          if (this.typingCancelled.has(jid) || !this.typingIntervals.has(jid)) {
+            return;
+          }
           try {
             await (channel as TextChannel).sendTyping();
           } catch {

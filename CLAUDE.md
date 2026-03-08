@@ -77,11 +77,13 @@ The Discord channel supports rich messaging beyond plain text:
 
 Discord bot requires these permissions: Send Messages, Read Message History, View Channels, Attach Files, Embed Links, Send Messages in Threads, Add Reactions, Manage Messages, Manage Channels, Server Members Intent.
 
-**Typing Indicator:** Discord `setTyping()` refreshes every 7 seconds via interval, keeping "typing..." visible until the response is sent. Intervals are tracked per-JID and cleaned up via `clearTypingInterval()` (synchronous to prevent race conditions). `sendMessage()` clears the interval BEFORE sending the message to prevent the refresh from firing between send and cleanup. Also cleared by `setTyping(false)` and `disconnect()`.
+**Typing Indicator:** Discord `setTyping()` refreshes every 7 seconds via interval, keeping "typing..." visible until the response is sent. Intervals are tracked per-JID and cleaned up via `clearTypingInterval()` (synchronous to prevent race conditions). A `typingCancelled` Set guards against in-flight `sendTyping()` API calls — the interval callback checks this flag before each call, preventing already-queued callbacks from restarting the typing indicator after a message is sent. `sendMessage()` clears the interval BEFORE sending the message. Also cleared by `setTyping(false)` and `disconnect()`.
 
-**Startup Message:** After all channels connect, Daemon sends "🖤 Back online!" to the main Discord channel so users know the service is live.
+**Startup Message:** After all channels connect (with a 2s delay for Discord cache population), Daemon sends "🖤 Back online!" to the main Discord channel so users know the service is live. The send is now `await`ed with full error logging.
 
 **Builder Output Filtering:** Mini-Daemon only relays meaningful content to Discord: startup/progress text and completion/failure embeds. Tool calls and stderr are logged but not sent to Discord to reduce noise.
+
+**Merge Failure Protection:** If the build passes validation but the merge into main fails (e.g., conflicts), the pipeline preserves the worktree and branch instead of cleaning up. A yellow embed is sent with the branch name, worktree path, error details, and recovery instructions. The user can reply "cleanup" to discard or merge manually. Status is written as `merge_failed`.
 
 ## Agent Boot Context
 

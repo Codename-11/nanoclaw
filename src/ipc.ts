@@ -1263,7 +1263,62 @@ export async function processTaskIpc(
             encoding: 'utf-8',
           }).trim();
 
-          execSync(`git merge ${branchName} --no-edit`, { cwd });
+          try {
+            execSync(`git merge ${branchName} --no-edit`, { cwd });
+          } catch (mergeErr) {
+            // Merge failed — preserve the worktree and branch for manual recovery.
+            // Abort the failed merge to leave main in a clean state.
+            try {
+              execSync('git merge --abort', { cwd, stdio: 'pipe' });
+            } catch { /* merge may not be in progress */ }
+
+            const mergeErrMsg =
+              mergeErr instanceof Error ? mergeErr.message.slice(-500) : String(mergeErr);
+            const mergeFailEmbed: EmbedData = {
+              title: '⚠️ Build Complete — Merge Failed',
+              description:
+                `Build and tests passed, but merge into main failed. Work preserved on branch \`${branchName}\`.`,
+              color: 16776960, // yellow
+              fields: [
+                {
+                  name: 'Branch',
+                  value: `\`${branchName}\``,
+                  inline: true,
+                },
+                {
+                  name: 'Worktree',
+                  value: `\`${worktreeDir}\``,
+                  inline: true,
+                },
+                {
+                  name: 'Error',
+                  value: '```\n' + mergeErrMsg.slice(0, 600) + '\n```',
+                  inline: false,
+                },
+                {
+                  name: 'Recovery',
+                  value: 'Reply "cleanup" to discard, or merge manually:\n`cd ' + worktreeDir + ' && git diff main`',
+                  inline: false,
+                },
+              ],
+            };
+            if (buildChatJid && useBuilderBot) {
+              await builderSendEmbed(buildChatJid, mergeFailEmbed);
+            } else if (buildChatJid && deps.sendEmbed) {
+              await deps.sendEmbed(buildChatJid, mergeFailEmbed);
+            } else {
+              await sendAs(
+                `⚠️ Build complete but merge failed — work preserved on branch \`${branchName}\`. Reply "cleanup" to discard.`,
+              );
+            }
+            // Disconnect builder bot but do NOT clean up worktree/branch
+            if (useBuilderBot) disconnectBuilderBot();
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
+            writeStatus('merge_failed', mergeErrMsg);
+            selfBuildInProgress = false;
+            builderProcess = null;
+            return;
+          }
 
           // Get list of changed files between pre-merge HEAD and current HEAD
           const changedFiles = execSync(
