@@ -413,7 +413,7 @@ The self-build pipeline has its own Discord bot identity so progress messages ap
 DISCORD_BUILDER_BOT_TOKEN=your-mini-daemon-bot-token
 ```
 
-When set, all self-build progress messages, embeds (success/failure), and heartbeat updates are sent through the Mini-Daemon bot client (`src/builder-bot.ts`). The client connects on-demand when a build starts and disconnects after the final embed is sent. If no builder token is configured, messages fall back to the main Daemon bot.
+When set, all self-build progress messages, embeds (success/failure), and heartbeat updates are sent through the Mini-Daemon bot client (`src/builder-bot.ts`). The client connects on-demand when a build starts and disconnects after the final embed is sent. Messages contain only the content itself — no "Mini-Daemon:" text prefix — since the bot's username/avatar already identifies the sender. If no builder token is configured, messages fall back to the main Daemon bot.
 
 The `.env` file is located using a two-step resolution: first `process.cwd()/.env`, then a fallback derived from the compiled file's location (`dist/env.js` → project root). This ensures the token is found even when the service runs with a non-standard working directory (e.g. systemd without `WorkingDirectory`). Discord env vars from `.env` are also forwarded into the builder sidecar's spawn environment.
 
