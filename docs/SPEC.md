@@ -226,6 +226,8 @@ Channels self-register using a barrel-import pattern:
 | `src/types.ts` | `Channel` interface, `ChannelOpts`, message types |
 | `src/index.ts` | Orchestrator — instantiates channels, runs message loop |
 | `src/router.ts` | Finds the owning channel for a JID, formats messages |
+| `src/builder-bot.ts` | Mini-Daemon's separate Discord client for self-build messages |
+| `src/env.ts` | Reads `.env` without polluting `process.env` |
 
 ### Adding a New Channel
 
@@ -414,6 +416,14 @@ DISCORD_BUILDER_BOT_TOKEN=your-mini-daemon-bot-token
 When set, all self-build progress messages, embeds (success/failure), and heartbeat updates are sent through the Mini-Daemon bot client (`src/builder-bot.ts`). The client connects on-demand when a build starts and disconnects after the final embed is sent. If no builder token is configured, messages fall back to the main Daemon bot.
 
 The `.env` file is located using a two-step resolution: first `process.cwd()/.env`, then a fallback derived from the compiled file's location (`dist/env.js` → project root). This ensures the token is found even when the service runs with a non-standard working directory (e.g. systemd without `WorkingDirectory`). Discord env vars from `.env` are also forwarded into the builder sidecar's spawn environment.
+
+#### Merge Strategy
+
+Before merging the worktree branch into main, the pipeline auto-commits any uncommitted changes on main (`wip: auto-save before self-build merge`). This prevents merge failures from dirty working trees. Using an auto-commit instead of `git stash` avoids stash-pop conflicts when both sides touch the same files — git's 3-way merge handles overlapping changes correctly.
+
+#### Relay Prompt
+
+Mini-Daemon's prompt is prepended with instructions explaining that its stdout is parsed by the host process and relayed to Discord automatically. This prevents Mini-Daemon from wasting time searching for MCP messaging tools (which don't exist in the sidecar session). The relay prompt is injected in `src/ipc.ts` before the `claude -p` invocation.
 
 #### Smart Reload
 
