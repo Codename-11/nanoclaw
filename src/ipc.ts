@@ -761,9 +761,16 @@ export async function processTaskIpc(
 
         // Connect the Mini-Daemon builder bot so messages appear under its own identity.
         // Falls back to the main Daemon bot if the token isn't configured.
-        const useBuilderBot =
-          buildChatJid?.startsWith('dc:') &&
-          (await connectBuilderBot());
+        const isDiscord = buildChatJid?.startsWith('dc:') ?? false;
+        logger.info(
+          { buildChatJid, isDiscord },
+          'Self-build: checking builder bot eligibility',
+        );
+        const useBuilderBot = isDiscord && (await connectBuilderBot());
+        logger.info(
+          { useBuilderBot, buildChatJid },
+          'Self-build: builder bot decision',
+        );
 
         const sendAs = async (msg: string) => {
           appendLog(msg);

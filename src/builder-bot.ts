@@ -16,12 +16,23 @@ let ready = false;
  * Get the builder bot token from .env (not process.env, to avoid leaking).
  */
 function getToken(): string {
+  const fromEnv = process.env.DISCORD_BUILDER_BOT_TOKEN || '';
   const envVars = readEnvFile(['DISCORD_BUILDER_BOT_TOKEN']);
-  return (
-    process.env.DISCORD_BUILDER_BOT_TOKEN ||
-    envVars.DISCORD_BUILDER_BOT_TOKEN ||
-    ''
+  const fromFile = envVars.DISCORD_BUILDER_BOT_TOKEN || '';
+
+  const token = fromEnv || fromFile;
+
+  logger.info(
+    {
+      fromProcessEnv: fromEnv ? `${fromEnv.length} chars` : '(empty)',
+      fromDotEnv: fromFile ? `${fromFile.length} chars` : '(empty)',
+      resolved: token ? `${token.length} chars` : '(empty)',
+      cwd: process.cwd(),
+    },
+    'Builder bot: token resolution',
   );
+
+  return token;
 }
 
 /**
@@ -29,11 +40,14 @@ function getToken(): string {
  * no token is configured. Reuses an existing connection if already logged in.
  */
 export async function connectBuilderBot(): Promise<boolean> {
-  if (client && ready) return true;
+  if (client && ready) {
+    logger.info('Builder bot: reusing existing connection');
+    return true;
+  }
 
   const token = getToken();
   if (!token) {
-    logger.warn('Builder bot: DISCORD_BUILDER_BOT_TOKEN not set in .env — falling back to main bot');
+    logger.warn('Builder bot: DISCORD_BUILDER_BOT_TOKEN not set — falling back to main bot');
     return false;
   }
 
@@ -50,7 +64,7 @@ export async function connectBuilderBot(): Promise<boolean> {
 
   return new Promise<boolean>((resolve) => {
     const timeout = setTimeout(() => {
-      logger.warn('Builder bot login timed out');
+      logger.warn('Builder bot login timed out (15s)');
       resolve(false);
     }, 15_000);
 
@@ -59,14 +73,14 @@ export async function connectBuilderBot(): Promise<boolean> {
       ready = true;
       logger.info(
         { username: c.user.tag, id: c.user.id },
-        'Builder bot connected',
+        'Builder bot connected as',
       );
       resolve(true);
     });
 
     client!.login(token).catch((err) => {
       clearTimeout(timeout);
-      logger.warn({ err }, 'Builder bot login failed');
+      logger.warn({ err: String(err) }, 'Builder bot login failed');
       resolve(false);
     });
   });
@@ -108,7 +122,10 @@ export async function builderSendMessage(
   text: string,
 ): Promise<void> {
   const channel = await resolveChannel(jid);
-  if (!channel) return;
+  if (!channel) {
+    logger.warn({ jid }, 'Builder bot: cannot resolve channel — message dropped');
+    return;
+  }
 
   const MAX_LENGTH = 2000;
   if (text.length <= MAX_LENGTH) {
