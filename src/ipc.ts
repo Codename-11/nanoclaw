@@ -1316,10 +1316,7 @@ export async function processTaskIpc(
       }
       logger.info({ sourceGroup }, 'Cancelling Mini-Daemon build via IPC');
       if (data.chatJid) {
-        await deps.sendMessage(
-          data.chatJid,
-          'Cancelling Mini-Daemon build...',
-        );
+        await deps.sendMessage(data.chatJid, 'Cancelling Mini-Daemon build...');
       }
       builderProcess.kill('SIGTERM');
       setTimeout(() => {
