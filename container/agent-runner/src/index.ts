@@ -398,6 +398,21 @@ async function runQuery(
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
+  // Load optional group-level context files (SOUL.md, IDENTITY.md, MEMORY.md)
+  const contextFiles = ['SOUL.md', 'IDENTITY.md', 'MEMORY.md'];
+  const contextParts: string[] = [];
+  for (const filename of contextFiles) {
+    const filePath = path.join('/workspace/group', filename);
+    if (fs.existsSync(filePath)) {
+      const content = fs.readFileSync(filePath, 'utf-8').trim();
+      if (content) {
+        contextParts.push(`# ${filename.replace('.md', '')}\n${content}`);
+        log(`Loaded context file: ${filename} (${content.length} chars)`);
+      }
+    }
+  }
+  const groupContext = contextParts.length > 0 ? contextParts.join('\n\n') : undefined;
+
   // Discover additional directories mounted at /workspace/extra/*
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
   const extraDirs: string[] = [];
@@ -421,8 +436,8 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
+      systemPrompt: (globalClaudeMd || groupContext)
+        ? { type: 'preset' as const, preset: 'claude_code' as const, append: [globalClaudeMd, groupContext].filter(Boolean).join('\n\n') }
         : undefined,
       allowedTools: [
         'Bash',

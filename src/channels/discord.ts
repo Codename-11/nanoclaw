@@ -39,6 +39,8 @@ export class DiscordChannel implements Channel {
   private botToken: string;
   // Track active thread per group JID so replies go to the right thread
   private activeThreads = new Map<string, string>();
+  // Typing refresh intervals per JID (Discord typing expires after ~10s)
+  private typingIntervals = new Map<string, ReturnType<typeof setInterval>>();
 
   constructor(botToken: string, opts: DiscordChannelOpts) {
     this.botToken = botToken;
@@ -304,6 +306,12 @@ export class DiscordChannel implements Channel {
   }
 
   async disconnect(): Promise<void> {
+    // Clear all typing refresh intervals
+    for (const interval of this.typingIntervals.values()) {
+      clearInterval(interval);
+    }
+    this.typingIntervals.clear();
+
     if (this.client) {
       this.client.destroy();
       this.client = null;
@@ -312,11 +320,29 @@ export class DiscordChannel implements Channel {
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
+    // Always clear existing refresh interval first
+    const existing = this.typingIntervals.get(jid);
+    if (existing) {
+      clearInterval(existing);
+      this.typingIntervals.delete(jid);
+    }
+
     if (!this.client || !isTyping) return;
     try {
       const channel = await this.resolveChannel(jid);
       if (channel && 'sendTyping' in channel) {
         await (channel as TextChannel).sendTyping();
+        // Refresh every 7s to keep "typing..." visible until response arrives
+        const interval = setInterval(async () => {
+          try {
+            await (channel as TextChannel).sendTyping();
+          } catch {
+            // Non-critical — stop refreshing if channel becomes unavailable
+            clearInterval(interval);
+            this.typingIntervals.delete(jid);
+          }
+        }, 7000);
+        this.typingIntervals.set(jid, interval);
       }
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Discord typing indicator');

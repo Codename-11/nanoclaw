@@ -69,6 +69,17 @@ The Discord channel supports rich messaging beyond plain text:
 
 Discord bot requires these permissions: Send Messages, Read Message History, View Channels, Attach Files, Embed Links, Send Messages in Threads, Add Reactions.
 
+**Typing Indicator:** Discord `setTyping()` refreshes every 7 seconds via interval, keeping "typing..." visible until the response is sent. Intervals are tracked per-JID and cleaned up on `setTyping(false)` or `disconnect()`.
+
+## Agent Boot Context
+
+The agent-runner automatically loads optional context files from the group directory (`/workspace/group/`) at startup and appends them to the system prompt:
+- `SOUL.md` — personality and behavioral directives
+- `IDENTITY.md` — identity and role definition
+- `MEMORY.md` — persistent memory across sessions
+
+These supplement `CLAUDE.md` (loaded by the SDK automatically). Missing files are silently skipped.
+
 ## Container Agent Capabilities
 
 - **Self-Diagnostics:** `mcp__nanoclaw__self_diagnose` — agents can check their own health (recent log errors/warnings, IPC queue depth, disk usage, task state, CLAUDE.md status). Runs locally inside the container with no IPC needed.
