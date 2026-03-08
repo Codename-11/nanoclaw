@@ -1210,7 +1210,9 @@ export async function processTaskIpc(
           if (stderrFlushTimer) clearTimeout(stderrFlushTimer);
           if (heartbeatInterval) clearInterval(heartbeatInterval);
 
-          const reloadAction = needsRestart ? 'Restarting now...' : 'No restart needed — changes are hot-reloadable.';
+          const reloadAction = needsRestart
+            ? 'Restarting now...'
+            : 'No restart needed — changes are hot-reloadable.';
           const successEmbed: EmbedData = {
             title: '🔧 Mini-Daemon — Build Complete',
             description: `Changes merged from worktree branch \`${branchName}\`. Build and tests passed.`,
@@ -1223,9 +1225,10 @@ export async function processTaskIpc(
               },
               {
                 name: 'Changed Files',
-                value: changedFiles.length <= 10
-                  ? changedFiles.map((f) => `\`${f}\``).join('\n')
-                  : `${changedFiles.length} files changed`,
+                value:
+                  changedFiles.length <= 10
+                    ? changedFiles.map((f) => `\`${f}\``).join('\n')
+                    : `${changedFiles.length} files changed`,
                 inline: false,
               },
               {
@@ -1249,7 +1252,10 @@ export async function processTaskIpc(
           // NOW disconnect the builder bot (after embed is sent)
           if (useBuilderBot) disconnectBuilderBot();
 
-          writeStatus('completed', needsRestart ? 'merged+restarting' : 'merged+hot-reload');
+          writeStatus(
+            'completed',
+            needsRestart ? 'merged+restarting' : 'merged+hot-reload',
+          );
           selfBuildInProgress = false;
           builderProcess = null;
 

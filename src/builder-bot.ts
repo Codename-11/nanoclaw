@@ -47,7 +47,9 @@ export async function connectBuilderBot(): Promise<boolean> {
 
   const token = getToken();
   if (!token) {
-    logger.warn('Builder bot: DISCORD_BUILDER_BOT_TOKEN not set — falling back to main bot');
+    logger.warn(
+      'Builder bot: DISCORD_BUILDER_BOT_TOKEN not set — falling back to main bot',
+    );
     return false;
   }
 
@@ -123,7 +125,10 @@ export async function builderSendMessage(
 ): Promise<void> {
   const channel = await resolveChannel(jid);
   if (!channel) {
-    logger.warn({ jid }, 'Builder bot: cannot resolve channel — message dropped');
+    logger.warn(
+      { jid },
+      'Builder bot: cannot resolve channel — message dropped',
+    );
     return;
   }
 
