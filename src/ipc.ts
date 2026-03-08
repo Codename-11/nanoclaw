@@ -103,26 +103,48 @@ export function startIpcWatcher(deps: IpcDeps): void {
   // Clear stale self_build_status from a previous process crash
   try {
     const statusGlob = fs.readdirSync(ipcBaseDir).filter((f) => {
-      try { return fs.statSync(path.join(ipcBaseDir, f)).isDirectory(); } catch { return false; }
+      try {
+        return fs.statSync(path.join(ipcBaseDir, f)).isDirectory();
+      } catch {
+        return false;
+      }
     });
     for (const folder of statusGlob) {
-      const statusFile = path.join(ipcBaseDir, folder, 'self_build_status.json');
+      const statusFile = path.join(
+        ipcBaseDir,
+        folder,
+        'self_build_status.json',
+      );
       if (fs.existsSync(statusFile)) {
         try {
           const status = JSON.parse(fs.readFileSync(statusFile, 'utf-8'));
           if (status.active) {
-            logger.warn({ folder }, 'Clearing stale self_build_status from previous run');
-            fs.writeFileSync(statusFile, JSON.stringify({
-              ...status,
-              active: false,
-              status: 'interrupted',
-              detail: 'Service restarted while build was active',
-            }, null, 2));
+            logger.warn(
+              { folder },
+              'Clearing stale self_build_status from previous run',
+            );
+            fs.writeFileSync(
+              statusFile,
+              JSON.stringify(
+                {
+                  ...status,
+                  active: false,
+                  status: 'interrupted',
+                  detail: 'Service restarted while build was active',
+                },
+                null,
+                2,
+              ),
+            );
           }
-        } catch { /* ignore corrupt file */ }
+        } catch {
+          /* ignore corrupt file */
+        }
       }
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   const processIpcFiles = async () => {
     // Scan all group IPC directories (identity determined by directory)
@@ -688,7 +710,9 @@ export async function processTaskIpc(
         try {
           const ts = new Date().toISOString().slice(11, 19);
           fs.appendFileSync(logFile, `[${ts}] ${msg}\n`);
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       };
 
       const sendAs = async (msg: string) => {
@@ -697,26 +721,42 @@ export async function processTaskIpc(
           try {
             await deps.sendMessage(buildChatJid, `🔧 **Mini-Daemon**: ${msg}`);
           } catch (err) {
-            logger.warn({ err, chatJid: buildChatJid }, 'Mini-Daemon: failed to send message to Discord');
+            logger.warn(
+              { err, chatJid: buildChatJid },
+              'Mini-Daemon: failed to send message to Discord',
+            );
           }
         }
       };
 
       const writeStatus = (status: string, detail?: string) => {
         try {
-          fs.writeFileSync(statusFile, JSON.stringify({
-            active: status === 'running',
-            status,
-            startedAt: buildStartTime,
-            updatedAt: new Date().toISOString(),
-            prompt: buildPrompt?.slice(0, 100),
-            detail,
-          }, null, 2));
-        } catch { /* ignore */ }
+          fs.writeFileSync(
+            statusFile,
+            JSON.stringify(
+              {
+                active: status === 'running',
+                status,
+                startedAt: buildStartTime,
+                updatedAt: new Date().toISOString(),
+                prompt: buildPrompt?.slice(0, 100),
+                detail,
+              },
+              null,
+              2,
+            ),
+          );
+        } catch {
+          /* ignore */
+        }
       };
 
       // Clear old log and start fresh
-      try { fs.writeFileSync(logFile, ''); } catch { /* ignore */ }
+      try {
+        fs.writeFileSync(logFile, '');
+      } catch {
+        /* ignore */
+      }
       writeStatus('running');
 
       // Run the entire self-build flow asynchronously using a git worktree
@@ -734,18 +774,25 @@ export async function processTaskIpc(
               execSync(`git worktree remove --force ${worktreeDir}`, { cwd });
             }
           } catch (wtErr) {
-            logger.warn({ err: wtErr, worktreeDir }, 'Mini-Daemon: worktree remove failed');
+            logger.warn(
+              { err: wtErr, worktreeDir },
+              'Mini-Daemon: worktree remove failed',
+            );
             // Force-remove the directory if git worktree remove failed
             try {
               fs.rmSync(worktreeDir, { recursive: true, force: true });
               execSync('git worktree prune', { cwd });
-            } catch { /* last resort */ }
+            } catch {
+              /* last resort */
+            }
           }
           try {
             if (branchName) {
               execSync(`git branch -D ${branchName}`, { cwd, stdio: 'pipe' });
             }
-          } catch { /* branch may not exist */ }
+          } catch {
+            /* branch may not exist */
+          }
           if (stderrFlushTimer) clearTimeout(stderrFlushTimer);
           if (heartbeatInterval) clearInterval(heartbeatInterval);
         };
@@ -797,8 +844,10 @@ export async function processTaskIpc(
 
           // Spawn Claude Code in the worktree directory (not cwd!)
           const claudeArgs = [
-            '-p', fullPrompt,
-            '--output-format', 'stream-json',
+            '-p',
+            fullPrompt,
+            '--output-format',
+            'stream-json',
             '--dangerously-skip-permissions',
             '--verbose',
           ];
@@ -808,15 +857,11 @@ export async function processTaskIpc(
           // Strip CLAUDECODE to prevent "nested session" rejection
           const spawnEnv = { ...process.env };
           delete spawnEnv.CLAUDECODE;
-          const claude = spawn(
-            'claude',
-            claudeArgs,
-            {
-              cwd: worktreeDir,
-              stdio: ['pipe', 'pipe', 'pipe'],
-              env: spawnEnv,
-            },
-          );
+          const claude = spawn('claude', claudeArgs, {
+            cwd: worktreeDir,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: spawnEnv,
+          });
 
           builderProcess = claude;
 
@@ -937,9 +982,7 @@ export async function processTaskIpc(
                     stderrBuffer.length > 500
                       ? '...' + stderrBuffer.slice(-500)
                       : stderrBuffer;
-                  await sendAs(
-                    `⚠️ stderr:\n\`\`\`\n${msg.trim()}\n\`\`\``,
-                  );
+                  await sendAs(`⚠️ stderr:\n\`\`\`\n${msg.trim()}\n\`\`\``);
                   stderrBuffer = '';
                 }
               }, 10_000);
@@ -1057,23 +1100,21 @@ export async function processTaskIpc(
           // Success — merge worktree branch into main
           await sendAs('Build + tests passed! Merging into main...');
 
-          // Stash any uncommitted changes on main so git merge doesn't fail
-          let stashed = false;
+          // Auto-commit any uncommitted changes on main so git merge doesn't fail.
+          // This is safer than stash — stash pop can produce conflict markers.
+          let didAutoCommit = false;
           try {
-            const stashOutput = execSync('git stash --include-untracked', { cwd, stdio: 'pipe' }).toString();
-            stashed = !stashOutput.includes('No local changes');
-          } catch { /* no changes to stash */ }
-
-          try {
-            execSync(`git merge ${branchName} --no-edit`, { cwd });
-          } finally {
-            // Restore stashed changes regardless of merge outcome
-            if (stashed) {
-              try { execSync('git stash pop', { cwd, stdio: 'pipe' }); } catch {
-                logger.warn('Mini-Daemon: git stash pop failed after merge — stashed changes may need manual recovery');
-              }
+            execSync('git add -A', { cwd, stdio: 'pipe' });
+            try {
+              execSync('git diff --cached --quiet', { cwd, stdio: 'pipe' });
+            } catch {
+              // There are staged changes — commit them
+              execSync('git commit -m "wip: auto-save before self-build merge"', { cwd, stdio: 'pipe' });
+              didAutoCommit = true;
             }
-          }
+          } catch { /* nothing to commit */ }
+
+          execSync(`git merge ${branchName} --no-edit`, { cwd });
 
           // Clean up the worktree before restarting
           cleanup();
@@ -1154,13 +1195,19 @@ export async function processTaskIpc(
       if (!isMain) break;
       if (!selfBuildInProgress || !builderProcess) {
         if (data.chatJid) {
-          await deps.sendMessage(data.chatJid, '🔧 No active Mini-Daemon session to cancel.');
+          await deps.sendMessage(
+            data.chatJid,
+            '🔧 No active Mini-Daemon session to cancel.',
+          );
         }
         break;
       }
       logger.info({ sourceGroup }, 'Cancelling Mini-Daemon build via IPC');
       if (data.chatJid) {
-        await deps.sendMessage(data.chatJid, '🔧 Cancelling Mini-Daemon build...');
+        await deps.sendMessage(
+          data.chatJid,
+          '🔧 Cancelling Mini-Daemon build...',
+        );
       }
       builderProcess.kill('SIGTERM');
       setTimeout(() => {
