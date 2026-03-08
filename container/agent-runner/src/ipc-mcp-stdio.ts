@@ -827,6 +827,171 @@ server.tool(
   },
 );
 
+// --- Discord Admin Tools (main group only) ---
+
+const ADMIN_RESULT_FILE = path.join(IPC_DIR, 'admin_result.json');
+
+/**
+ * Write an admin IPC request and poll for the result file.
+ * Returns the parsed result or throws on timeout.
+ */
+async function adminIpcCall(data: object, timeoutMs = 10000): Promise<Record<string, unknown>> {
+  // Clean up any stale result file
+  try { fs.unlinkSync(ADMIN_RESULT_FILE); } catch { /* ignore */ }
+
+  writeIpcFile(MESSAGES_DIR, data);
+
+  // Poll for result
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    await new Promise((r) => setTimeout(r, 300));
+    if (fs.existsSync(ADMIN_RESULT_FILE)) {
+      const result = JSON.parse(fs.readFileSync(ADMIN_RESULT_FILE, 'utf-8'));
+      try { fs.unlinkSync(ADMIN_RESULT_FILE); } catch { /* ignore */ }
+      return result;
+    }
+  }
+  throw new Error('Admin IPC call timed out');
+}
+
+server.tool(
+  'discord_delete_message',
+  'Delete a specific Discord message by channel and message ID. Main group only.',
+  {
+    channel_id: z.string().describe('The Discord channel ID'),
+    message_id: z.string().describe('The Discord message ID to delete'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return { content: [{ type: 'text' as const, text: 'Only the main group can use Discord admin tools.' }], isError: true };
+    }
+    try {
+      writeIpcFile(MESSAGES_DIR, {
+        type: 'discord_delete_message',
+        channelId: args.channel_id,
+        messageId: args.message_id,
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `Message ${args.message_id} deleted from channel ${args.channel_id}.` }] };
+    } catch (err) {
+      return { content: [{ type: 'text' as const, text: `Failed to delete message: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+    }
+  },
+);
+
+server.tool(
+  'discord_delete_messages',
+  'Bulk delete the last N messages from a Discord channel (up to 100). Only works on messages less than 14 days old. Main group only.',
+  {
+    channel_id: z.string().describe('The Discord channel ID'),
+    count: z.number().min(1).max(100).describe('Number of recent messages to delete (1-100)'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return { content: [{ type: 'text' as const, text: 'Only the main group can use Discord admin tools.' }], isError: true };
+    }
+    try {
+      const result = await adminIpcCall({
+        type: 'discord_delete_messages',
+        channelId: args.channel_id,
+        count: args.count,
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `Deleted ${result.deleted} messages from channel ${args.channel_id}.` }] };
+    } catch (err) {
+      return { content: [{ type: 'text' as const, text: `Failed to bulk delete: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+    }
+  },
+);
+
+server.tool(
+  'discord_create_channel',
+  'Create a new Discord channel in the server. Main group only.',
+  {
+    name: z.string().describe('Channel name (lowercase, hyphens)'),
+    type: z.enum(['text', 'voice', 'category']).default('text').describe('Channel type'),
+    topic: z.string().optional().describe('Channel topic (text channels only)'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return { content: [{ type: 'text' as const, text: 'Only the main group can use Discord admin tools.' }], isError: true };
+    }
+    try {
+      const result = await adminIpcCall({
+        type: 'discord_create_channel',
+        channelName: args.name,
+        channelType: args.type,
+        topic: args.topic,
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `Channel created: ${result.name} (ID: ${result.id})` }] };
+    } catch (err) {
+      return { content: [{ type: 'text' as const, text: `Failed to create channel: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+    }
+  },
+);
+
+server.tool(
+  'discord_edit_channel',
+  'Edit a Discord channel\'s name or topic. Main group only.',
+  {
+    channel_id: z.string().describe('The Discord channel ID to edit'),
+    name: z.string().optional().describe('New channel name'),
+    topic: z.string().optional().describe('New channel topic'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return { content: [{ type: 'text' as const, text: 'Only the main group can use Discord admin tools.' }], isError: true };
+    }
+    try {
+      writeIpcFile(MESSAGES_DIR, {
+        type: 'discord_edit_channel',
+        channelId: args.channel_id,
+        channelName: args.name,
+        topic: args.topic,
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: `Channel ${args.channel_id} edit requested.` }] };
+    } catch (err) {
+      return { content: [{ type: 'text' as const, text: `Failed to edit channel: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+    }
+  },
+);
+
+server.tool(
+  'discord_get_members',
+  'List all members in the Discord server. Returns ID, username, display name, and bot status. Main group only.',
+  {},
+  async () => {
+    if (!isMain) {
+      return { content: [{ type: 'text' as const, text: 'Only the main group can use Discord admin tools.' }], isError: true };
+    }
+    try {
+      const result = await adminIpcCall({
+        type: 'discord_get_members',
+        chatJid,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      const members = result.members as { id: string; username: string; displayName: string; bot: boolean }[];
+      const formatted = members
+        .map((m) => `- ${m.displayName} (@${m.username}, ID: ${m.id})${m.bot ? ' [BOT]' : ''}`)
+        .join('\n');
+      return { content: [{ type: 'text' as const, text: `Server members (${members.length}):\n${formatted}` }] };
+    } catch (err) {
+      return { content: [{ type: 'text' as const, text: `Failed to get members: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+    }
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

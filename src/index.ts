@@ -566,26 +566,35 @@ async function main(): Promise<void> {
   }
 
   // Send startup acknowledgement to main group
-  const groupEntries = Object.entries(registeredGroups);
-  logger.info(
-    { groupCount: groupEntries.length, channelCount: channels.length },
-    'Startup: looking for main group to send ack',
-  );
-  for (const [jid, group] of groupEntries) {
-    if (group.isMain) {
-      const ch = findChannel(channels, jid);
-      logger.info(
-        { jid, channelFound: !!ch, channelName: ch?.name },
-        'Startup: found main group',
-      );
-      if (ch) {
-        ch.sendMessage(jid, '🖤 Back online!')
-          .then(() => logger.info({ jid }, 'Startup: ack sent successfully'))
-          .catch((err) =>
+  {
+    let mainFound = false;
+    for (const [jid, group] of Object.entries(registeredGroups)) {
+      if (group.isMain) {
+        mainFound = true;
+        const ch = findChannel(channels, jid);
+        if (ch) {
+          logger.info({ jid }, 'Sending startup message to main group');
+          ch.sendMessage(jid, '🖤 Back online!').catch((err) =>
             logger.warn({ jid, err }, 'Failed to send startup message'),
           );
+        } else {
+          logger.warn(
+            {
+              jid,
+              channelCount: channels.length,
+              channelNames: channels.map((c) => c.name),
+            },
+            'No channel found for main group JID — startup message not sent',
+          );
+        }
+        break;
       }
-      break;
+    }
+    if (!mainFound) {
+      logger.warn(
+        { groupCount: Object.keys(registeredGroups).length },
+        'No main group found in registered groups — startup message skipped',
+      );
     }
   }
 
@@ -635,6 +644,31 @@ async function main(): Promise<void> {
         return Promise.resolve();
       }
       return channel.addReaction(jid, messageId, emoji);
+    },
+    deleteMessage: (channelId, messageId) => {
+      const dc = channels.find((c) => c.name === 'discord');
+      if (!dc?.deleteMessage) throw new Error('Discord channel not available');
+      return dc.deleteMessage(channelId, messageId);
+    },
+    deleteMessages: (channelId, count) => {
+      const dc = channels.find((c) => c.name === 'discord');
+      if (!dc?.deleteMessages) throw new Error('Discord channel not available');
+      return dc.deleteMessages(channelId, count);
+    },
+    createChannel: (name, type, topic) => {
+      const dc = channels.find((c) => c.name === 'discord');
+      if (!dc?.createChannel) throw new Error('Discord channel not available');
+      return dc.createChannel(name, type, topic);
+    },
+    editChannel: (channelId, options) => {
+      const dc = channels.find((c) => c.name === 'discord');
+      if (!dc?.editChannel) throw new Error('Discord channel not available');
+      return dc.editChannel(channelId, options);
+    },
+    getMembers: () => {
+      const dc = channels.find((c) => c.name === 'discord');
+      if (!dc?.getMembers) throw new Error('Discord channel not available');
+      return dc.getMembers();
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

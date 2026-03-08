@@ -177,7 +177,7 @@ interface Channel {
 
 The `EmbedData` type supports `title`, `description`, `color`, `fields` (name/value/inline), `thumbnail`, `image`, `footer`, and `url`.
 
-**Typing indicator lifecycle:** Discord's `setTyping(jid, true)` starts a 7-second refresh interval. It is cleared in three places: (1) `processGroupMessages` finally block after agent completes, (2) `sendMessage()` auto-clears after each message is confirmed sent to Discord, and (3) `disconnect()` clears all intervals on shutdown.
+**Typing indicator lifecycle:** Discord's `setTyping(jid, true)` starts a 7-second refresh interval. Cleanup uses the synchronous `clearTypingInterval()` method to prevent race conditions. It is cleared in three places: (1) `processGroupMessages` finally block after agent completes, (2) `sendMessage()` clears the interval BEFORE sending to prevent the refresh from firing between send and cleanup, and (3) `disconnect()` clears all intervals on shutdown.
 
 ### Self-Registration Pattern
 
@@ -684,6 +684,11 @@ The `nanoclaw` MCP server is created dynamically per agent call with the current
 | `run_host_command` | Run a predefined host command: `update`, `restart`, `status` (main only) |
 | `self_diagnose` | Run container self-diagnostics (logs, IPC queues, disk, tasks, CLAUDE.md) |
 | `self_build_status` | Check if a Mini-Daemon build session is active (main only) |
+| `discord_delete_message` | Delete a specific Discord message (main only) |
+| `discord_delete_messages` | Bulk delete last N messages from a channel (main only) |
+| `discord_create_channel` | Create a new Discord channel (main only) |
+| `discord_edit_channel` | Edit a Discord channel's name or topic (main only) |
+| `discord_get_members` | List Discord server members (main only) |
 
 ---
 

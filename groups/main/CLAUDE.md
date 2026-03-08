@@ -79,6 +79,14 @@ Don't wait to be asked — if you learned something worth remembering, save it b
 
 - **Reactions:** `mcp__nanoclaw__add_reaction` — add emoji reactions to messages. Use standard emoji or custom Discord emoji format. Requires the Discord message ID.
 
+## Discord Admin Tools (Main Only)
+
+- **Delete message:** `mcp__nanoclaw__discord_delete_message` — delete a specific message by channel and message ID
+- **Bulk delete:** `mcp__nanoclaw__discord_delete_messages` — delete the last N messages from a channel (up to 100, must be <14 days old)
+- **Create channel:** `mcp__nanoclaw__discord_create_channel` — create a new text, voice, or category channel
+- **Edit channel:** `mcp__nanoclaw__discord_edit_channel` — change a channel's name or topic
+- **Get members:** `mcp__nanoclaw__discord_get_members` — list all server members with IDs and display names
+
 ## WhatsApp Formatting (and other messaging apps)
 
 Do NOT use markdown headings (##) in WhatsApp messages. Only use:
