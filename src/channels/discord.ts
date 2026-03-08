@@ -109,6 +109,19 @@ export class DiscordChannel implements Channel {
         }
       }
 
+      // Early registered-group check so we can show typing before slow I/O
+      const group = this.opts.registeredGroups()[routingJid];
+      if (group) {
+        // Show "typing..." instantly before attachment downloads / reply fetches
+        try {
+          if ('sendTyping' in message.channel) {
+            await (message.channel as TextChannel).sendTyping();
+          }
+        } catch {
+          // Non-critical — don't block message processing
+        }
+      }
+
       // Handle attachments — download to group workspace if possible, else placeholder
       if (message.attachments.size > 0) {
         const attachDir = this.opts.getAttachmentDir?.(routingJid);
@@ -170,7 +183,6 @@ export class DiscordChannel implements Channel {
       this.opts.onChatMetadata(routingJid, timestamp, chatName, 'discord', isGroup);
 
       // Only deliver full message for registered groups
-      const group = this.opts.registeredGroups()[routingJid];
       if (!group) {
         logger.debug(
           { chatJid: routingJid, chatName },
