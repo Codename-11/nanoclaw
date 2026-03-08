@@ -8,6 +8,7 @@ import { CronExpressionParser } from 'cron-parser';
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { readEnvFile } from './env.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -879,8 +880,14 @@ export async function processTaskIpc(
           if (buildModel) {
             claudeArgs.push('--model', buildModel);
           }
-          // Strip CLAUDECODE to prevent "nested session" rejection
-          const spawnEnv = { ...process.env };
+          // Strip CLAUDECODE to prevent "nested session" rejection.
+          // Merge Discord env vars from .env file since readEnvFile()
+          // deliberately does not populate process.env.
+          const discordEnv = readEnvFile([
+            'DISCORD_BUILDER_BOT_TOKEN',
+            'DISCORD_BOT_TOKEN',
+          ]);
+          const spawnEnv = { ...process.env, ...discordEnv };
           delete spawnEnv.CLAUDECODE;
           const claude = spawn('claude', claudeArgs, {
             cwd: worktreeDir,

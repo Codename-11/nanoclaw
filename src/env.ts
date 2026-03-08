@@ -1,6 +1,10 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { logger } from './logger.js';
+
+/** Project root derived from compiled file location (dist/env.js → project root). */
+const PROJECT_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 /**
  * Parse the .env file and return values for the requested keys.
@@ -9,7 +13,13 @@ import { logger } from './logger.js';
  * so they don't leak to child processes.
  */
 export function readEnvFile(keys: string[]): Record<string, string> {
-  const envFile = path.join(process.cwd(), '.env');
+  // Try CWD first (standard location), fall back to project root derived from
+  // the compiled file's location. This ensures .env is found even when the
+  // service is started from a different working directory (e.g. systemd).
+  let envFile = path.join(process.cwd(), '.env');
+  if (!fs.existsSync(envFile)) {
+    envFile = path.join(PROJECT_ROOT, '.env');
+  }
   let content: string;
   try {
     content = fs.readFileSync(envFile, 'utf-8');
