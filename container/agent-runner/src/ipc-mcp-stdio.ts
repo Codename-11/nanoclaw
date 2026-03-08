@@ -280,6 +280,223 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+server.tool(
+  'send_attachment',
+  'Send a file attachment to the user or group. The file must exist in your workspace (/workspace/group/ or /workspace/ipc/). Use this to share generated files, images, reports, etc.',
+  {
+    file_path: z.string().describe('Absolute path to the file inside the container (e.g., /workspace/group/report.pdf)'),
+    caption: z.string().optional().describe('Optional text caption to display with the attachment'),
+  },
+  async (args) => {
+    if (!fs.existsSync(args.file_path)) {
+      return {
+        content: [{ type: 'text' as const, text: `File not found: ${args.file_path}` }],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'attachment',
+      chatJid,
+      filePath: args.file_path,
+      caption: args.caption || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Attachment sent: ${args.file_path}` }] };
+  },
+);
+
+server.tool(
+  'send_embed',
+  'Send a rich embed message (Discord only). Creates a structured card with title, description, fields, colors, and images.',
+  {
+    title: z.string().optional().describe('Embed title'),
+    description: z.string().optional().describe('Embed body text (supports markdown)'),
+    color: z.number().optional().describe('Color as decimal integer (e.g., 5814783 for blue, 16711680 for red, 65280 for green)'),
+    fields: z.array(z.object({
+      name: z.string(),
+      value: z.string(),
+      inline: z.boolean().optional(),
+    })).optional().describe('Structured fields displayed in the embed'),
+    thumbnail: z.string().optional().describe('URL of thumbnail image'),
+    image: z.string().optional().describe('URL of large image'),
+    footer: z.string().optional().describe('Footer text'),
+    url: z.string().optional().describe('URL the title links to'),
+  },
+  async (args) => {
+    const data = {
+      type: 'embed',
+      chatJid,
+      embed: {
+        title: args.title,
+        description: args.description,
+        color: args.color,
+        fields: args.fields,
+        thumbnail: args.thumbnail,
+        image: args.image,
+        footer: args.footer,
+        url: args.url,
+      },
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: 'Embed sent.' }] };
+  },
+);
+
+server.tool(
+  'self_build',
+  'Spawn a Claude Code session on the host to modify NanoClaw\'s own codebase. Main group only. ' +
+  'A sidecar "Builder" identity will send progress updates to chat while working. ' +
+  'Changes are made on a safety branch with automatic build+test validation and rollback on failure. ' +
+  'On success, changes are merged and nanoclaw restarts automatically. ' +
+  'Use this when the user asks you to modify your own code, add features, fix bugs, or enhance NanoClaw.',
+  {
+    prompt: z.string().describe(
+      'Detailed instructions for what Claude Code should do. Be specific about files, patterns, and desired behavior. ' +
+      'ALWAYS include: "After code changes, update CLAUDE.md, docs/SPEC.md, and groups/main/CLAUDE.md with any new capabilities. ' +
+      'If MCP tools were added/changed in container/agent-runner/src/ipc-mcp-stdio.ts, run: rm -rf data/sessions/*/agent-runner-src"',
+    ),
+    timeout_minutes: z.number().optional().describe('Max duration in minutes (default: 10, max: 30)'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can run self-build sessions.' }],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'run_claude_session',
+      prompt: args.prompt,
+      timeout: args.timeout_minutes
+        ? Math.min(args.timeout_minutes, 30) * 60_000
+        : undefined,
+      chatJid,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{
+        type: 'text' as const,
+        text: 'Self-build session requested. Builder will send progress updates to chat. ' +
+          'Changes will be validated (build + test) before merging. Service restarts automatically on success.',
+      }],
+    };
+  },
+);
+
+server.tool(
+  'run_host_command',
+  'Run a predefined command on the host machine. Main group only. Allowed commands: "update" (git pull + npm install + build), "restart" (restart nanoclaw service), "status" (git log + service status).',
+  {
+    command: z.enum(['update', 'restart', 'status']).describe('The host command to run'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can run host commands.' }],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'run_host_command',
+      prompt: args.command,
+      chatJid,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Host command "${args.command}" requested. Output will be sent to chat.` }] };
+  },
+);
+
+server.tool(
+  'change_model',
+  'Change the AI model used for future agent invocations. Main group only. Takes effect on the next container spawn (not the current session). Common models: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5-20251001.',
+  {
+    model: z.string().describe('Model ID (e.g., "claude-sonnet-4-6", "claude-opus-4-6")'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can change the model.' }],
+        isError: true,
+      };
+    }
+
+    // Write a task to update .env on the host
+    const data = {
+      type: 'change_model',
+      model: args.model,
+      chatJid,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Model change to "${args.model}" requested. Will take effect on next invocation.` }] };
+  },
+);
+
+server.tool(
+  'get_system_info',
+  'Get information about the current system: model, version, capabilities, and runtime status.',
+  {},
+  async () => {
+    const model = process.env.CLAUDE_MODEL || 'default (not set)';
+    const version = (() => {
+      try {
+        const pkg = JSON.parse(fs.readFileSync('/workspace/project/package.json', 'utf-8'));
+        return pkg.version || 'unknown';
+      } catch {
+        return 'unknown';
+      }
+    })();
+
+    const info = {
+      model,
+      nanoclaw_version: version,
+      group: groupFolder,
+      chat_jid: chatJid,
+      is_main: isMain,
+      capabilities: [
+        'send_message',
+        'send_attachment',
+        'send_embed',
+        'schedule_task',
+        'list_tasks',
+        'register_group',
+        ...(isMain ? ['run_host_command', 'change_model'] : []),
+      ],
+      container: {
+        workspace: '/workspace/group',
+        ipc: '/workspace/ipc',
+        has_project_access: isMain && fs.existsSync('/workspace/project'),
+      },
+    };
+
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(info, null, 2) }],
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

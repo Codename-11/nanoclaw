@@ -1,3 +1,4 @@
+import { ChildProcess, exec, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -8,10 +9,12 @@ import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
-import { RegisteredGroup } from './types.js';
+import { EmbedData, RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendAttachment?: (jid: string, filePath: string, caption?: string) => Promise<void>;
+  sendEmbed?: (jid: string, embed: EmbedData) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -24,7 +27,60 @@ export interface IpcDeps {
   ) => void;
 }
 
+/**
+ * Resolve a container-relative path to a host path.
+ * Only allows paths under the group's workspace to prevent path traversal.
+ */
+function resolveContainerPath(
+  containerPath: string,
+  groupIpcDir: string,
+): string | null {
+  // Container paths like /workspace/ipc/input/file.png → groupIpcDir/input/file.png
+  // Container paths like /workspace/group/file.png → groups/{folder}/file.png
+  if (containerPath.startsWith('/workspace/ipc/')) {
+    const relative = containerPath.replace('/workspace/ipc/', '');
+    const resolved = path.resolve(groupIpcDir, relative);
+    // Prevent path traversal
+    if (!resolved.startsWith(groupIpcDir)) return null;
+    return resolved;
+  }
+  // For /workspace/group/ paths, resolve via groups directory
+  if (containerPath.startsWith('/workspace/group/')) {
+    const relative = containerPath.replace('/workspace/group/', '');
+    // The group folder name is the last segment of groupIpcDir
+    const groupFolder = path.basename(groupIpcDir);
+    const groupsDir = path.join(DATA_DIR, '..', 'groups');
+    const resolved = path.resolve(groupsDir, groupFolder, relative);
+    if (!resolved.startsWith(path.resolve(groupsDir, groupFolder))) return null;
+    return resolved;
+  }
+  return null;
+}
+
 let ipcWatcherRunning = false;
+let selfBuildInProgress = false;
+let builderProcess: ChildProcess | null = null;
+
+/**
+ * Check if a self-build session is currently active.
+ */
+export function isSelfBuildActive(): boolean {
+  return selfBuildInProgress;
+}
+
+/**
+ * Send a message to the active Builder sidecar session.
+ * Returns true if message was delivered, false if no active session.
+ */
+export function sendToBuilder(text: string): boolean {
+  if (!selfBuildInProgress || !builderProcess?.stdin?.writable) return false;
+  try {
+    builderProcess.stdin.write(text + '\n');
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -73,24 +129,62 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(messagesDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (data.type === 'message' && data.chatJid && data.text) {
-                // Authorization: verify this group can send to this chatJid
-                const targetGroup = registeredGroups[data.chatJid];
-                if (
-                  isMain ||
-                  (targetGroup && targetGroup.folder === sourceGroup)
-                ) {
+              // Authorization: verify this group can send to this chatJid
+              const targetGroup = registeredGroups[data.chatJid];
+              const authorized =
+                isMain ||
+                (targetGroup && targetGroup.folder === sourceGroup);
+
+              if (data.chatJid && authorized) {
+                if (data.type === 'message' && data.text) {
                   await deps.sendMessage(data.chatJid, data.text);
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
                   );
-                } else {
-                  logger.warn(
+                } else if (
+                  data.type === 'attachment' &&
+                  data.filePath &&
+                  deps.sendAttachment
+                ) {
+                  // Resolve container path to host path via group's IPC directory
+                  const groupIpcDir = path.join(ipcBaseDir, sourceGroup);
+                  const hostPath = resolveContainerPath(
+                    data.filePath,
+                    groupIpcDir,
+                  );
+                  if (hostPath && fs.existsSync(hostPath)) {
+                    await deps.sendAttachment(
+                      data.chatJid,
+                      hostPath,
+                      data.caption,
+                    );
+                    logger.info(
+                      { chatJid: data.chatJid, sourceGroup, file: hostPath },
+                      'IPC attachment sent',
+                    );
+                  } else {
+                    logger.warn(
+                      { chatJid: data.chatJid, filePath: data.filePath },
+                      'IPC attachment file not found or path outside workspace',
+                    );
+                  }
+                } else if (
+                  data.type === 'embed' &&
+                  data.embed &&
+                  deps.sendEmbed
+                ) {
+                  await deps.sendEmbed(data.chatJid, data.embed);
+                  logger.info(
                     { chatJid: data.chatJid, sourceGroup },
-                    'Unauthorized IPC message attempt blocked',
+                    'IPC embed sent',
                   );
                 }
+              } else if (data.chatJid && !authorized) {
+                logger.warn(
+                  { chatJid: data.chatJid, sourceGroup, type: data.type },
+                  'Unauthorized IPC message attempt blocked',
+                );
               }
               fs.unlinkSync(filePath);
             } catch (err) {
@@ -382,6 +476,400 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'change_model': {
+      // Main-group-only: update CLAUDE_MODEL in .env
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized change_model attempt blocked',
+        );
+        break;
+      }
+
+      const model = (data as { model?: string }).model;
+      if (!model) {
+        logger.warn('change_model: no model specified');
+        break;
+      }
+
+      try {
+        const envPath = path.join(process.cwd(), '.env');
+        let envContent = fs.readFileSync(envPath, 'utf-8');
+
+        if (envContent.match(/^CLAUDE_MODEL=.*/m)) {
+          envContent = envContent.replace(
+            /^CLAUDE_MODEL=.*/m,
+            `CLAUDE_MODEL=${model}`,
+          );
+        } else {
+          envContent = envContent.trimEnd() + `\nCLAUDE_MODEL=${model}\n`;
+        }
+
+        fs.writeFileSync(envPath, envContent);
+        logger.info({ model }, 'Model changed in .env');
+
+        if (data.chatJid) {
+          await deps.sendMessage(
+            data.chatJid,
+            `Model changed to **${model}**. Takes effect on next invocation.`,
+          );
+        }
+      } catch (err) {
+        logger.error({ err }, 'Failed to change model in .env');
+        if (data.chatJid) {
+          await deps.sendMessage(
+            data.chatJid,
+            `Failed to change model: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+      break;
+    }
+
+    case 'run_claude_session': {
+      // Main-group-only: spawn interactive Claude Code sidecar on the host
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized run_claude_session attempt blocked',
+        );
+        break;
+      }
+
+      if (selfBuildInProgress) {
+        if (data.chatJid) {
+          await deps.sendMessage(
+            data.chatJid,
+            '🔧 **Mini-Daemon**: Already working on something! Talk to me or wait for me to finish.',
+          );
+        }
+        break;
+      }
+
+      const buildPrompt = data.prompt;
+      if (!buildPrompt) {
+        logger.warn('run_claude_session: no prompt provided');
+        break;
+      }
+
+      selfBuildInProgress = true;
+      const buildChatJid = data.chatJid;
+      const timeoutMs = Math.min(
+        (data as { timeout?: number }).timeout || 600_000,
+        1_800_000, // 30 min max
+      );
+      const cwd = process.cwd();
+
+      const sendAs = async (msg: string) => {
+        if (buildChatJid) {
+          await deps.sendMessage(buildChatJid, `🔧 **Mini-Daemon**: ${msg}`);
+        }
+      };
+
+      // Run the entire self-build flow asynchronously
+      (async () => {
+        let originalBranch = '';
+        let branchName = '';
+        let didStash = false;
+
+        try {
+          await sendAs("I'm spinning up! Give me a sec to set up safety rails...");
+
+          // Git safety net
+          originalBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd })
+            .toString()
+            .trim();
+          const stashBefore = execSync('git stash list', { cwd })
+            .toString()
+            .trim()
+            .split('\n')
+            .filter(Boolean).length;
+          execSync('git stash --include-untracked', { cwd });
+          const stashAfter = execSync('git stash list', { cwd })
+            .toString()
+            .trim()
+            .split('\n')
+            .filter(Boolean).length;
+          didStash = stashAfter > stashBefore;
+
+          const hash = execSync('git rev-parse --short HEAD', { cwd })
+            .toString()
+            .trim();
+          branchName = `self-build/${hash}-${Date.now()}`;
+          execSync(`git checkout -b ${branchName}`, { cwd });
+
+          await sendAs(
+            `Safety branch \`${branchName}\` created. Starting work now — talk to me anytime!`,
+          );
+
+          // Spawn Claude Code as interactive sidecar with streaming output
+          const claude = spawn('claude', [
+            '--output-format', 'stream-json',
+            '--dangerously-skip-permissions',
+            '--verbose',
+          ], {
+            cwd,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: { ...process.env },
+          });
+
+          builderProcess = claude;
+
+          // Write the initial prompt
+          claude.stdin.write(buildPrompt + '\n');
+
+          // Batched progress updates — avoids spamming Discord
+          // Accumulates text + tool calls and flushes as a single message
+          let textBuffer = '';
+          let toolBuffer: string[] = [];
+          let flushTimer: ReturnType<typeof setTimeout> | null = null;
+          const FLUSH_DELAY = 5000; // batch for 5s before sending
+
+          const flushBuffers = async () => {
+            flushTimer = null;
+            const parts: string[] = [];
+
+            if (toolBuffer.length > 0) {
+              // Compact tool summary — collapse consecutive reads/globs into one line
+              const summary = toolBuffer.join(', ');
+              parts.push(`⚙️ ${summary}`);
+              toolBuffer = [];
+            }
+
+            if (textBuffer.trim()) {
+              const msg = textBuffer.length > 1500
+                ? textBuffer.slice(0, 1500) + '...'
+                : textBuffer;
+              parts.push(msg);
+              textBuffer = '';
+            }
+
+            if (parts.length > 0) {
+              await sendAs(parts.join('\n'));
+            }
+          };
+
+          const scheduleFlush = () => {
+            if (flushTimer) clearTimeout(flushTimer);
+            flushTimer = setTimeout(flushBuffers, FLUSH_DELAY);
+          };
+
+          // Parse streaming JSON output from claude
+          let stdoutLineBuffer = '';
+          claude.stdout.on('data', (chunk: Buffer) => {
+            stdoutLineBuffer += chunk.toString();
+            const lines = stdoutLineBuffer.split('\n');
+            stdoutLineBuffer = lines.pop() || ''; // keep incomplete last line
+
+            for (const line of lines) {
+              if (!line.trim()) continue;
+              try {
+                const event = JSON.parse(line);
+
+                // Relay assistant text to Discord (batched)
+                if (event.type === 'assistant' && event.message?.content) {
+                  for (const block of event.message.content) {
+                    if (block.type === 'text' && block.text) {
+                      textBuffer += block.text;
+                      scheduleFlush();
+                    }
+                    // Collect tool usage compactly
+                    if (block.type === 'tool_use') {
+                      const toolName = block.name || 'tool';
+                      const input = block.input || {};
+                      let detail = '';
+                      if (input.file_path) {
+                        // Show just filename, not full path
+                        const basename = input.file_path.split('/').pop();
+                        detail = `(${basename})`;
+                      } else if (toolName === 'Bash' && input.command) {
+                        detail = `(\`${input.command.slice(0, 40)}\`)`;
+                      } else if (input.pattern) {
+                        detail = `(${input.pattern})`;
+                      }
+                      toolBuffer.push(`${toolName}${detail}`);
+                      scheduleFlush();
+                    }
+                  }
+                }
+
+                // Final result — flush everything and send
+                if (event.type === 'result') {
+                  if (flushTimer) clearTimeout(flushTimer);
+                  flushBuffers();
+                  const resultText = event.result || '';
+                  if (resultText && resultText.length > 0) {
+                    const truncated = resultText.length > 1500
+                      ? resultText.slice(0, 1500) + '...'
+                      : resultText;
+                    sendAs(truncated);
+                  }
+                }
+              } catch {
+                // Not JSON or parse error — ignore
+              }
+            }
+          });
+
+          claude.stderr.on('data', (chunk: Buffer) => {
+            logger.debug({ builder: true }, chunk.toString().trim());
+          });
+
+          // Wait for claude to exit
+          const exitCode = await new Promise<number | null>((resolve) => {
+            const killTimer = setTimeout(() => {
+              logger.warn('Builder timeout, killing');
+              claude.kill('SIGTERM');
+              setTimeout(() => claude.kill('SIGKILL'), 10_000);
+            }, timeoutMs);
+
+            claude.on('close', (code) => {
+              clearTimeout(killTimer);
+              resolve(code);
+            });
+            claude.on('error', (err) => {
+              clearTimeout(killTimer);
+              logger.error({ err }, 'Builder spawn error');
+              resolve(1);
+            });
+          });
+
+          builderProcess = null;
+          if (flushTimer) {
+            clearTimeout(flushTimer);
+            await flushBuffers();
+          }
+
+          if (exitCode !== 0) {
+            throw new Error(`Claude exited with code ${exitCode}`);
+          }
+
+          await sendAs('Session complete! Validating build...');
+
+          // Commit any uncommitted changes
+          try {
+            execSync('git add -A', { cwd });
+            execSync(
+              `git diff --cached --quiet || git commit -m "self-build: ${buildPrompt.slice(0, 50).replace(/"/g, "'")}"`,
+              { cwd },
+            );
+          } catch {
+            // No changes to commit is fine
+          }
+
+          // Validate: build + test
+          try {
+            execSync('npm run build && npm test', {
+              cwd,
+              timeout: 120_000,
+              stdio: 'pipe',
+            });
+          } catch (validateErr) {
+            const errMsg =
+              validateErr instanceof Error
+                ? validateErr.message.slice(-500)
+                : String(validateErr);
+            execSync(`git checkout ${originalBranch}`, { cwd });
+            execSync(`git branch -D ${branchName}`, { cwd });
+            if (didStash) {
+              try { execSync('git stash pop', { cwd }); } catch { /* */ }
+            }
+            await sendAs(
+              `Build/test failed — rolled back.\n\`\`\`\n${errMsg}\n\`\`\``,
+            );
+            selfBuildInProgress = false;
+            return;
+          }
+
+          // Success — merge into original branch
+          execSync(`git checkout ${originalBranch}`, { cwd });
+          execSync(`git merge ${branchName} --no-edit`, { cwd });
+          if (didStash) {
+            try { execSync('git stash pop', { cwd }); } catch { /* */ }
+          }
+
+          await sendAs(
+            `All done! Changes merged from \`${branchName}\`, build + tests passed. Restarting now...`,
+          );
+
+          selfBuildInProgress = false;
+          builderProcess = null;
+          exec('systemctl --user restart nanoclaw', { timeout: 15_000 });
+        } catch (err) {
+          const errMsg =
+            err instanceof Error ? err.message.slice(-500) : String(err);
+          try {
+            if (branchName && originalBranch) {
+              execSync(`git checkout ${originalBranch}`, { cwd });
+              try { execSync(`git branch -D ${branchName}`, { cwd }); } catch { /* */ }
+            }
+            if (didStash) {
+              try { execSync('git stash pop', { cwd }); } catch { /* */ }
+            }
+          } catch { /* rollback failed */ }
+          await sendAs(`Something went wrong — rolled back.\n\`\`\`\n${errMsg}\n\`\`\``);
+          selfBuildInProgress = false;
+          builderProcess = null;
+        }
+      })();
+
+      break;
+    }
+
+    case 'run_host_command': {
+      // Main-group-only: run a predefined host command (e.g., update, restart)
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup, command: data.prompt },
+          'Unauthorized run_host_command attempt blocked',
+        );
+        break;
+      }
+
+      const command = data.prompt; // Reuse prompt field for the command name
+      const allowedCommands: Record<string, string> = {
+        update: `cd "${process.cwd()}" && git pull origin main && npm install && npm run build`,
+        restart: `systemctl --user restart nanoclaw`,
+        status: `cd "${process.cwd()}" && git log --oneline -5 && echo "---" && systemctl --user status nanoclaw --no-pager`,
+      };
+
+      const cmd = allowedCommands[command || ''];
+      if (!cmd) {
+        logger.warn(
+          { command },
+          'Unknown host command — allowed: update, restart, status',
+        );
+        // Send feedback to the user
+        if (data.chatJid) {
+          await deps.sendMessage(
+            data.chatJid,
+            `Unknown command "${command}". Allowed: ${Object.keys(allowedCommands).join(', ')}`,
+          );
+        }
+        break;
+      }
+
+      logger.info({ command, sourceGroup }, 'Executing host command via IPC');
+
+      exec(cmd, { timeout: 120_000 }, async (err, stdout, stderr) => {
+        const output = stdout || stderr || (err ? err.message : 'Done');
+        const truncated =
+          output.length > 1500 ? output.slice(-1500) + '...' : output;
+        if (data.chatJid) {
+          await deps.sendMessage(
+            data.chatJid,
+            `**Host command: ${command}**\n\`\`\`\n${truncated}\n\`\`\``,
+          );
+        }
+        if (err) {
+          logger.error({ command, err: err.message }, 'Host command failed');
+        } else {
+          logger.info({ command }, 'Host command completed');
+        }
+      });
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');

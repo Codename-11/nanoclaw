@@ -3,6 +3,7 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
@@ -39,7 +40,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
-import { startIpcWatcher } from './ipc.js';
+import { isSelfBuildActive, sendToBuilder, startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   isSenderAllowed,
@@ -478,6 +479,13 @@ async function main(): Promise<void> {
 
   // Channel callbacks (shared by all channels)
   const channelOpts = {
+    getAttachmentDir: (chatJid: string): string | null => {
+      const group = registeredGroups[chatJid];
+      if (!group) return null;
+      const dir = path.join(DATA_DIR, 'ipc', group.folder, 'input');
+      fs.mkdirSync(dir, { recursive: true });
+      return dir;
+    },
     onMessage: (chatJid: string, msg: NewMessage) => {
       // Sender allowlist drop mode: discard messages from denied senders before storing
       if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
@@ -496,6 +504,25 @@ async function main(): Promise<void> {
         }
       }
       storeMessage(msg);
+
+      // Forward messages to Builder sidecar if active and from main group
+      const group = registeredGroups[chatJid];
+      if (
+        group?.isMain &&
+        isSelfBuildActive() &&
+        !msg.is_from_me &&
+        !msg.is_bot_message
+      ) {
+        const sent = sendToBuilder(
+          `[Message from ${msg.sender_name}]: ${msg.content}`,
+        );
+        if (sent) {
+          logger.debug(
+            { chatJid, sender: msg.sender_name },
+            'Forwarded message to Builder sidecar',
+          );
+        }
+      }
     },
     onChatMetadata: (
       chatJid: string,
@@ -550,6 +577,22 @@ async function main(): Promise<void> {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
+    },
+    sendAttachment: (jid, filePath, caption) => {
+      const channel = findChannel(channels, jid);
+      if (!channel?.sendAttachment) {
+        logger.warn({ jid }, 'Channel does not support attachments');
+        return Promise.resolve();
+      }
+      return channel.sendAttachment(jid, filePath, caption);
+    },
+    sendEmbed: (jid, embed) => {
+      const channel = findChannel(channels, jid);
+      if (!channel?.sendEmbed) {
+        logger.warn({ jid }, 'Channel does not support embeds');
+        return Promise.resolve();
+      }
+      return channel.sendEmbed(jid, embed);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

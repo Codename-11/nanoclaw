@@ -170,8 +170,12 @@ interface Channel {
   disconnect(): Promise<void>;
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   syncGroups?(force: boolean): Promise<void>;
+  sendAttachment?(jid: string, filePath: string, caption?: string): Promise<void>;
+  sendEmbed?(jid: string, embed: EmbedData): Promise<void>;
 }
 ```
+
+The `EmbedData` type supports `title`, `description`, `color`, `fields` (name/value/inline), `thumbnail`, `image`, `footer`, and `url`.
 
 ### Self-Registration Pattern
 
@@ -311,7 +315,7 @@ nanoclaw/
 ├── data/                          # Application state (gitignored)
 │   ├── sessions/                  # Per-group session data (.claude/ dirs with JSONL transcripts)
 │   ├── env/env                    # Copy of .env for container mounting
-│   └── ipc/                       # Container IPC (messages/, tasks/)
+│   └── ipc/                       # Container IPC (messages/, tasks/, input/)
 │
 ├── logs/                          # Runtime logs (gitignored)
 │   ├── nanoclaw.log               # Host stdout
@@ -631,6 +635,9 @@ The `nanoclaw` MCP server is created dynamically per agent call with the current
 | `resume_task` | Resume a paused task |
 | `cancel_task` | Delete a task |
 | `send_message` | Send a message to the group via its channel |
+| `send_attachment` | Send a file attachment to the group (Discord) |
+| `send_embed` | Send a rich embed message (Discord) |
+| `run_host_command` | Run a predefined host command: `update`, `restart`, `status` (main only) |
 
 ---
 

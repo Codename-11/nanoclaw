@@ -77,6 +77,25 @@ export interface TaskRunLog {
   error: string | null;
 }
 
+// --- Rich message types ---
+
+export interface EmbedField {
+  name: string;
+  value: string;
+  inline?: boolean;
+}
+
+export interface EmbedData {
+  title?: string;
+  description?: string;
+  color?: number;
+  fields?: EmbedField[];
+  thumbnail?: string;
+  image?: string;
+  footer?: string;
+  url?: string;
+}
+
 // --- Channel abstraction ---
 
 export interface Channel {
@@ -90,6 +109,10 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: send a file attachment.
+  sendAttachment?(jid: string, filePath: string, caption?: string): Promise<void>;
+  // Optional: send a rich embed.
+  sendEmbed?(jid: string, embed: EmbedData): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages
